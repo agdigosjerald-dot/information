@@ -1,17 +1,16 @@
 {
-  "name": "gov-assistance-system",
+  "name": "ph-gov-assistance-system",
   "version": "1.0.0",
-  "description": "Complete BIR/TIN, SSS, and Pag-IBIG Application Assistance, Document Management, Payment, and Tracking System",
+  "description": "Complete BIR/TIN, SSS & Pag-IBIG Application Assistance and Document Management System",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
-    "connect-pg-simple": "^9.0.1",
-    "dotenv": "^16.4.5",
+    "bcryptjs": "^2.4.3",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
+    "connect-pg-simple": "^9.0.1",
     "multer": "^1.4.5-lts.1",
     "pg": "^8.11.5"
   },
