@@ -1,11 +1,11 @@
 /**
  * COMPLETE BIR/TIN, SSS & PAG-IBIG APPLICATION ASSISTANCE SYSTEM
- * Production-Ready Single-File Node.js Application
+ * Production-ready single-file Node.js/Express application.
  */
 
 const express = require('express');
 const session = require('express-session');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const sqlite3 = require('sqlite3').verbose();
 const multer = require('multer');
 const path = require('path');
@@ -17,20 +17,35 @@ const PORT = process.env.PORT || 3000;
 // Ensure upload directory exists
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
+    fs.mkdirSync(uploadDir, { recursive: });
 }
 
-// Multer storage setup
+// Multer storage config
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
-    filename: (req, file, cb) => cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname))
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
 });
-const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = /jpeg|jpg|png|pdf/;
+        const extName = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+        const mimeType = allowedTypes.test(file.mimetype);
+        if (extName && mimeType) {
+            return cb(null, true);
+        }
+        cb(new Error('Only images and PDF files are allowed!'));
+    }
+});
 
-// Database setup
+// Database Setup
 const dbFile = path.join(__dirname, 'database.sqlite');
 const db = new sqlite3.Database(dbFile, (err) => {
-    if (err) console.error('Database connection error:', err.message);
+    if (err) console.error('Database opening error: ' + err.message);
     else console.log('Connected to SQLite database.');
 });
 
@@ -38,9 +53,9 @@ const db = new sqlite3.Database(dbFile, (err) => {
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        full_name TEXT NOT NULL,
+        fullname TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
-        mobile_number TEXT NOT NULL,
+        mobile TEXT NOT NULL,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -50,41 +65,13 @@ db.serialize(() => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
-        full_name TEXT NOT NULL
-    )`, () => {
-        // Create default admin if not exists (username: admin, password: password123)
-        db.get(`SELECT * FROM admin_users WHERE username = 'admin'`, async (err, row) => {
-            if (!row) {
-                const hashedPassword = await bcrypt.hash('password123', 10);
-                db.run(`INSERT INTO admin_users (username, password, full_name) VALUES (?, ?, ?)`, ['admin', hashedPassword, 'System Administrator']);
-            }
-        });
-    });
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS settings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        key TEXT UNIQUE NOT NULL,
+        key TEXT PRIMARY KEY,
         value TEXT
-    )`, () => {
-        const defaults = [
-            ['business_name', 'GovAssist PH - Application Assistance'],
-            ['contact_number', '+63 912 345 6789'],
-            ['email', 'support@govassist.ph'],
-            ['address', 'Metro Manila, Philippines'],
-            ['gcash_qr', ''],
-            ['gcash_account_name', 'GovAssist PH Services'],
-            ['gcash_number', '09123456789'],
-            ['bir_fee', '500'],
-            ['sss_fee', '400'],
-            ['pagibig_fee', '400'],
-            ['cash_instructions', 'Proceed to our main office or accredited partner agents to pay in cash.'],
-            ['terms', 'This system provides application assistance, document collection, processing, and tracking services. It is not an official government website unless an official partnership/integration is established.'],
-            ['customer_instructions', 'Please ensure all uploaded documents are clear and readable. Fill out all required fields accurately.']
-        ];
-        defaults.forEach(([k, v]) => {
-            db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`, [k, v]);
-        });
-    });
+    )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS applications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,9 +81,10 @@ db.serialize(() => {
         status TEXT DEFAULT 'Submitted',
         payment_status TEXT DEFAULT 'Unpaid',
         payment_method TEXT,
-        payment_ref TEXT,
-        amount_paid REAL,
-        date_paid TEXT,
+        amount_paid REAL DEFAULT 0,
+        reference_number TEXT,
+        payment_date TEXT,
+        gcash_proof TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(user_id) REFERENCES users(id)
@@ -105,9 +93,9 @@ db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS applicant_information (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         application_id INTEGER,
-        first_name TEXT,
-        middle_name TEXT,
-        last_name TEXT,
+        firstname TEXT,
+        middlename TEXT,
+        lastname TEXT,
         suffix TEXT,
         dob TEXT,
         pob TEXT,
@@ -116,26 +104,26 @@ db.serialize(() => {
         nationality TEXT,
         mobile TEXT,
         email TEXT,
-        house_block_lot TEXT,
+        house TEXT,
         street TEXT,
         barangay TEXT,
-        municipality_city TEXT,
+        municipality TEXT,
         province TEXT,
-        zip_code TEXT,
+        zipcode TEXT,
         FOREIGN KEY(application_id) REFERENCES applications(id)
     )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS parents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         application_id INTEGER,
-        father_first_name TEXT,
-        father_middle_name TEXT,
-        father_last_name TEXT,
+        father_firstname TEXT,
+        father_middlename TEXT,
+        father_lastname TEXT,
         father_dob TEXT,
-        mother_first_name TEXT,
-        mother_middle_name TEXT,
-        mother_maiden_name TEXT,
-        mother_last_name TEXT,
+        mother_firstname TEXT,
+        mother_middlename TEXT,
+        mother_maidenname TEXT,
+        mother_lastname TEXT,
         mother_dob TEXT,
         FOREIGN KEY(application_id) REFERENCES applications(id)
     )`);
@@ -143,8 +131,8 @@ db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS spouses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         application_id INTEGER,
-        spouse_full_name TEXT,
-        spouse_dob TEXT,
+        fullname TEXT,
+        dob TEXT,
         marriage_cert TEXT,
         FOREIGN KEY(application_id) REFERENCES applications(id)
     )`);
@@ -152,7 +140,7 @@ db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS beneficiaries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         application_id INTEGER,
-        full_name TEXT,
+        fullname TEXT,
         relationship TEXT,
         dob TEXT,
         sex TEXT,
@@ -163,7 +151,7 @@ db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS employment (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         application_id INTEGER,
-        employment_status TEXT,
+        status TEXT,
         employer_name TEXT,
         employer_address TEXT,
         employer_contact TEXT,
@@ -181,12 +169,12 @@ db.serialize(() => {
         application_id INTEGER,
         doc_type TEXT,
         file_path TEXT,
-        file_name TEXT,
+        original_name TEXT,
         uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(application_id) REFERENCES applications(id)
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS admin_uploaded_files (
+    db.run(`CREATE TABLE IF NOT EXISTS completed_documents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         application_id INTEGER,
         file_name TEXT,
@@ -215,22 +203,49 @@ db.serialize(() => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(user_id) REFERENCES users(id)
     )`);
+
+    // Seed default admin and settings if not present
+    db.get("SELECT * FROM admin_users WHERE username = 'admin'", (err, row) => {
+        if (!row) {
+            const hashed = bcrypt.hashSync('admin123', 10);
+            db.run("INSERT INTO admin_users (username, password) VALUES (?, ?)", ['admin', hashed]);
+        }
+    });
+
+    const defaultSettings = [
+        ['business_name', 'GovAssist PH'],
+        ['contact_number', '+63 912 345 6789'],
+        ['email', 'support@govassist.ph'],
+        ['address', 'Manila, Philippines'],
+        ['gcash_account_name', 'GovAssist Corp'],
+        ['gcash_number', '09171234567'],
+        ['gcash_qr', ''],
+        ['tin_fee', '500'],
+        ['sss_fee', '400'],
+        ['pagibig_fee', '400'],
+        ['cash_instructions', 'Proceed to our designated office or partner payment centers to complete cash payments.'],
+        ['terms', 'By using this application assistance system, you acknowledge that we assist in document processing and do not guarantee direct government approval.'],
+        ['customer_instructions', 'Please ensure all uploaded documents are clear and accurate to avoid processing delays.']
+    ];
+
+    defaultSettings.forEach(([key, value]) => {
+        db.run("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", [key, value]);
+    });
 });
 
-// Middleware setup
+// Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use('/uploads', express.static(uploadDir));
 app.use(session({
-    secret: 'govassist_secret_key_998877',
+    secret: 'gov_assist_secret_key_2026',
     resave: false,
-    saveUninitialized: false,
-    cookie: { maxAge: 24 * 60 * 60 * 1000 }
+    saveUninitialized: false
 }));
 
-// Helper functions for settings cache/fetch
+// Helper to get settings as object
 function getSettings(callback) {
-    db.all(`SELECT * FROM settings`, (err, rows) => {
+    db.all("SELECT * FROM settings", (err, rows) => {
         const settings = {};
         if (rows) {
             rows.forEach(r => settings[r.key] = r.value);
@@ -239,991 +254,739 @@ function getSettings(callback) {
     });
 }
 
-// ---------------------------------------------------------
-// PUBLIC / TRACKING ROUTES
-// ---------------------------------------------------------
-app.get('/track', (req, res) => {
-    const trackingNo = req.query.tracking_number || '';
-    getSettings(settings => {
-        let htmlContent = `
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Track Application - ${settings.business_name}</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-        </head>
-        <body class="bg-gray-50 font-sans">
-            <div class="max-w-2xl mx-auto p-6 mt-10 bg-white rounded-xl shadow-md">
-                <div class="text-center mb-6">
-                    <h1 class="text-2xl font-bold text-blue-900">Application Tracking</h1>
-                    <p class="text-sm text-gray-600">Enter your unique tracking number below to check progress.</p>
-                </div>
-                <form method="GET" action="/track" class="flex gap-2 mb-6">
-                    <input type="text" name="tracking_number" value="${trackingNo}" placeholder="e.g. TIN-20260901-0001" required class="flex-1 border p-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">Track</button>
-                </form>
-        `;
+// Helper to log application history
+function logHistory(appId, action, userName, remarks) {
+    db.run("INSERT INTO status_history (application_id, action, user_name, remarks) VALUES (?, ?, ?, ?)", 
+        [appId, action, userName, remarks]);
+}
 
+// Helper to create notification
+function createNotification(userId, message) {
+    db.run("INSERT INTO notifications (user_id, message) VALUES (?, ?)", [userId, message]);
+}
+
+// ==================== HTML / UI TEMPLATE BUILDER ==================== //
+
+function renderLayout(title, content, userRole = 'guest', settings = {}) {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title} - ${settings.business_name || 'GovAssist PH'}</title>
+    <style>
+        :root {
+            --primary: #1e3a8a;
+            --primary-dark: #1e40af;
+            --secondary: #0ea5e9;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg-light: #f8fafc;
+            --text-main: #1e293b;
+            --border: #cbd5e1;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background: var(--bg-light); color: var(--text-main); line-height: 1.5; display: flex; flex-direction: column; min-height: 100vh; }
+        header { background: var(--primary); color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        header h1 { font-size: 1.25rem; display: flex; align-items: center; gap: 10px; }
+        nav a { color: white; text-decoration: none; margin-left: 20px; font-weight: 500; font-size: 0.95rem; }
+        nav a:hover { text-decoration: underline; }
+        .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; width: 100%; flex: 1; }
+        footer { background: #0f172a; color: #94a3b8; text-align: center; padding: 1.5rem; font-size: 0.85rem; margin-top: auto; }
+        
+        /* Cards & Layouts */
+        .card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid #e2e8f0; }
+        .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
+        .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+        
+        /* Forms */
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.9rem; color: #334155; }
+        input, select, textarea { width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; font-size: 1rem; background: #fff; }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: var(--secondary); box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15); }
+        
+        /* Buttons */
+        .btn { display: inline-block; background: var(--primary); color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; text-decoration: none; text-align: center; transition: background 0.2s; }
+        .btn:hover { background: var(--primary-dark); }
+        .btn-secondary { background: #64748b; }
+        .btn-secondary:hover { background: #475569; }
+        .btn-danger { background: var(--danger); }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-success { background: var(--success); }
+        .btn-success:hover { background: #059669; }
+        .btn-sm { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
+        
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; background: white; border-radius: 6px; overflow: hidden; border: 1px solid #e2e8f0; }
+        th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 0.95rem; }
+        th { background: #f1f5f9; font-weight: 600; color: #475569; }
+        tr:hover { background: #f8fafc; }
+        
+        /* Badges */
+        .badge { display: inline-block; padding: 0.25rem 0.6rem; border-radius: 50px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .badge-submitted, .badge-pending { background: #fef3c7; color: #d97706; }
+        .badge-review, .badge-processing { background: #e0f2fe; color: #0284c7; }
+        .badge-completed, .badge-paid, .badge-verified { background: #d1fae5; color: #059669; }
+        .badge-rejected, .badge-cancelled, .badge-unpaid { background: #fee2e2; color: #dc2626; }
+        .badge-correction { background: #ffedd5; color: #c2410c; }
+
+        /* Utility */
+        .text-center { text-align: center; }
+        .mt-2 { margin-top: 1rem; }
+        .mb-2 { margin-bottom: 1rem; }
+        .alert { padding: 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.95rem; }
+        .alert-error { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+        .alert-success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+        
+        @media print {
+            header, footer, .no-print, .btn { display: none !important; }
+            body { background: white; color: black; }
+            .card { border: none; box-shadow: none; padding: 0; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>
+            <span>🏛️</span> ${settings.business_name || 'GovAssist PH'}
+        </h1>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/track">Track Application</a>
+            ${userRole === 'customer' ? `
+                <a href="/customer/dashboard">Dashboard</a>
+                <a href="/customer/notifications">Notifications</a>
+                <a href="/customer/logout">Logout</a>
+            ` : userRole === 'admin' ? `
+                <a href="/admin/dashboard">Admin Dashboard</a>
+                <a href="/admin/settings">Settings</a>
+                <a href="/admin/logout">Logout</a>
+            ` : `
+                <a href="/customer/login">Customer Login</a>
+                <a href="/admin/login">Admin Login</a>
+            `}
+        </nav>
+    </header>
+    <div class="container">
+        ${content}
+    </div>
+    <footer>
+        <p><strong>Important Disclaimer:</strong> This system provides application assistance, document collection, processing, and tracking services. It is not an official government website unless an official partnership/integration is established.</p>
+        <p class="mt-2">&copy; 2026 ${settings.business_name || 'GovAssist PH'}. All rights reserved.</p>
+    </footer>
+</body>
+</html>`;
+}
+
+// ==================== PUBLIC & AUTH ROUTES ==================== //
+
+app.get('/', (req, res) => {
+    getSettings((settings) => {
+        const content = `
+            <div class="card text-center" style="padding: 3rem 1.5rem;">
+                <h2 style="font-size: 2.2rem; margin-bottom: 1rem; color: var(--primary);">Government Application Assistance Made Easy</h2>
+                <p style="font-size: 1.1rem; color: #64748b; max-width: 700px; margin: 0 auto 2rem auto;">We help you securely prepare, submit, and track your BIR/TIN, SSS, and Pag-IBIG applications with professional guidance.</p>
+                <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+                    <a href="/customer/register" class="btn">Get Started - Register</a>
+                    <a href="/customer/login" class="btn btn-secondary">Customer Login</a>
+                    <a href="/track" class="btn" style="background: var(--secondary);">Track Existing Application</a>
+                </div>
+            </div>
+            <div class="grid-3">
+                <div class="card">
+                    <h3 style="color: var(--primary); margin-bottom: 0.5rem;">📋 BIR / TIN Application</h3>
+                    <p>New TIN registration, replacement cards, and updating taxpayer records handled seamlessly.</p>
+                </div>
+                <div class="card">
+                    <h3 style="color: var(--primary); margin-bottom: 0.5rem;">🛡️ SSS Application</h3>
+                    <p>Social Security System membership registration, loan assistance, and record verification.</p>
+                </div>
+                <div class="card">
+                    <h3 style="color: var(--primary); margin-bottom: 0.5rem;">🏠 Pag-IBIG Application</h3>
+                    <p>HDMF membership ID generation, Provident savings, and housing loan application assistance.</p>
+                </div>
+            </div>
+        `;
+        res.send(renderLayout('Home', content, req.session.user ? 'customer' : 'guest', settings));
+    });
+});
+
+// Public Tracking Page
+app.get('/track', (req, res) => {
+    const trackingNo = req.query.tracking || '';
+    getSettings((settings) => {
+        let searchResultHtml = '';
         if (trackingNo) {
-            db.get(`SELECT * FROM applications WHERE tracking_number = ?`, [trackingNo], (err, app) => {
-                if (!app) {
-                    htmlContent += `<div class="p-4 bg-red-100 text-red-700 rounded">Application not found for tracking number: <strong>${trackingNo}</strong></div>`;
-                    finishTrack();
+            db.get(`SELECT a.*, ai.firstname, ai.lastname FROM applications a 
+                    LEFT JOIN applicant_information ai ON a.id = ai.application_id 
+                    WHERE a.tracking_number = ?`, [trackingNo], (err, row) => {
+                if (row) {
+                    searchResultHtml = `
+                        <div class="card mt-2">
+                            <h3>Application Details</h3>
+                            <p><strong>Tracking Number:</strong> ${row.tracking_number}</p>
+                            <p><strong>Applicant:</strong> ${row.firstname} ${row.lastname}</p>
+                            <p><strong>Service:</strong> ${row.service_type}</p>
+                            <p><strong>Status:</strong> <span class="badge badge-${row.status.toLowerCase().replace(/\s+/g, '-')}">${row.status}</span></p>
+                            <p><strong>Payment Status:</strong> <span class="badge badge-${row.payment_status.toLowerCase().replace(/\s+/g, '-')}">${row.payment_status}</span></p>
+                            <p><strong>Last Updated:</strong> ${row.updated_at}</p>
+                        </div>
+                    `;
                 } else {
-                    db.all(`SELECT * FROM status_history WHERE application_id = ? ORDER BY created_at ASC`, [app.id], (err, history) => {
-                        htmlContent += `
-                        <div class="border-t pt-4">
-                            <div class="flex justify-between items-center mb-4">
-                                <div>
-                                    <p class="text-sm text-gray-500">Service: <span class="font-bold uppercase text-gray-800">${app.service_type}</span></p>
-                                    <p class="text-sm text-gray-500">Tracking Number: <span class="font-bold text-blue-600">${app.tracking_number}</span></p>
-                                </div>
-                                <div class="text-right">
-                                    <span class="px-3 py-1 text-xs rounded-full font-semibold bg-blue-100 text-blue-800">${app.status}</span>
-                                    <p class="text-xs text-gray-500 mt-1">Payment: <span class="font-semibold">${app.payment_status}</span></p>
-                                </div>
-                            </div>
-                            <h3 class="font-bold text-gray-700 mb-3">Progress Timeline</h3>
-                            <div class="space-y-3 border-l-2 border-blue-200 pl-4 ml-2">
-                        `;
-                        history.forEach(h => {
-                            htmlContent += `
-                                <div class="relative">
-                                    <div class="absolute -left-[21px] top-1 w-3 h-3 bg-blue-600 rounded-full border-2 border-white"></div>
-                                    <p class="text-xs text-gray-400">${h.created_at}</p>
-                                    <p class="font-medium text-gray-800">${h.action}</p>
-                                    ${h.remarks ? `<p class="text-sm text-gray-600 bg-gray-50 p-2 rounded mt-1">${h.remarks}</p>` : ''}
-                                </div>
-                            `;
-                        });
-                        htmlContent += `</div></div>`;
-                        finishTrack();
-                    });
+                    searchResultHtml = `<div class="alert alert-error mt-2">No application found with tracking number: ${trackingNo}</div>`;
                 }
+                sendTrackPage(searchResultHtml);
             });
         } else {
-            finishTrack();
+            sendTrackPage('');
         }
 
-        function finishTrack() {
-            htmlContent += `
-                <div class="mt-8 text-center">
-                    <a href="/customer/login" class="text-blue-600 text-sm hover:underline">Back to Customer Portal</a>
+        function sendTrackPage(resultHtml) {
+            const content = `
+                <div class="card" style="max-width: 600px; margin: 0 auto;">
+                    <h2>Track Your Application</h2>
+                    <p style="color: #64748b; margin-bottom: 1rem;">Enter your unique tracking number to check progress.</p>
+                    <form action="/track" method="GET">
+                        <div class="form-group">
+                            <label>Tracking Number</label>
+                            <input type="text" name="tracking" value="${trackingNo}" placeholder="e.g. TIN-20260901-0001" required>
+                        </div>
+                        <button type="submit" class="btn" style="width: 100%;">Search Tracking</button>
+                    </form>
+                    ${resultHtml}
                 </div>
-                <div class="mt-8 pt-4 border-t text-center text-xs text-gray-500">
-                    <p>${settings.terms}</p>
-                </div>
-            </div></body></html>`;
-            res.send(htmlContent);
+            `;
+            res.send(renderLayout('Track Application', content, req.session.user ? 'customer' : 'guest', settings));
         }
     });
 });
 
-// ---------------------------------------------------------
-// CUSTOMER AUTH & PORTAL ROUTES
-// ---------------------------------------------------------
-app.get('/customer/login', (req, res) => {
-    getSettings(settings => {
-        res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Customer Login - ${settings.business_name}</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-        </head>
-        <body class="bg-gray-100 flex items-center justify-center min-h-screen">
-            <div class="max-w-md w-full bg-white p-8 rounded-xl shadow-md">
-                <div class="text-center mb-6">
-                    <h1 class="text-2xl font-bold text-blue-900">${settings.business_name}</h1>
-                    <p class="text-sm text-gray-600 mt-1">Customer Portal Login</p>
-                </div>
-                ${req.query.registered ? '<div class="mb-4 p-3 bg-green-100 text-green-700 text-sm rounded">Registration successful! Please login.</div>' : ''}
-                ${req.query.error ? '<div class="mb-4 p-3 bg-red-100 text-red-700 text-sm rounded">Invalid username or password.</div>' : ''}
-                <form method="POST" action="/customer/login" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Username or Email</label>
-                        <input type="text" name="username" required class="w-full border p-2 rounded mt-1 focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Password</label>
-                        <input type="password" name="password" required class="w-full border p-2 rounded mt-1 focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    <button type="submit" class="w-full bg-blue-600 text-white p-2 rounded font-medium hover:bg-blue-700">Login</button>
+// ==================== CUSTOMER AUTH & PORTAL ==================== //
+
+app.get('/customer/register', (req, res) => {
+    getSettings((settings) => {
+        const error = req.query.error || '';
+        const content = `
+            <div class="card" style="max-width: 500px; margin: 0 auto;">
+                <h2>Customer Registration</h2>
+                ${error ? `<div class="alert alert-error">${error}</div>` : ''}
+                <form action="/customer/register" method="POST">
+                    <div class="form-group"><label>Full Name</label><input type="text" name="fullname" required></div>
+                    <div class="form-group"><label>Email Address</label><input type="email" name="email" required></div>
+                    <div class="form-group"><label>Mobile Number</label><input type="text" name="mobile" required></div>
+                    <div class="form-group"><label>Username</label><input type="text" name="username" required></div>
+                    <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
+                    <div class="form-group"><label>Confirm Password</label><input type="password" name="confirm_password" required></div>
+                    <button type="submit" class="btn" style="width: 100%;">Register Account</button>
                 </form>
-                <div class="mt-4 text-center text-sm">
-                    <p class="text-gray-600">Don't have an account? <a href="/customer/register" class="text-blue-600 font-medium hover:underline">Register here</a></p>
-                    <p class="mt-2"><a href="/track" class="text-gray-500 hover:underline">Track Application Status</a></p>
-                </div>
+                <p class="text-center mt-2"><a href="/customer/login">Already have an account? Login here</a></p>
             </div>
-        </body>
-        </html>
-        `);
+        `;
+        res.send(renderLayout('Customer Registration', content, 'guest', settings));
+    });
+});
+
+app.post('/customer/register', (req, res) => {
+    const { fullname, email, mobile, username, password, confirm_password } = req.body;
+    if (password !== confirm_password) {
+        return res.redirect('/customer/register?error=' + encodeURIComponent('Passwords do not match.'));
+    }
+    const hashed = bcrypt.hashSync(password, 10);
+    db.run("INSERT INTO users (fullname, email, mobile, username, password) VALUES (?, ?, ?, ?, ?)",
+        [fullname, email, mobile, username, hashed], (err) => {
+            if (err) {
+                return res.redirect('/customer/register?error=' + encodeURIComponent('Username or Email already exists.'));
+            }
+            res.redirect('/customer/login?success=' + encodeURIComponent('Registration successful! Please login.'));
+        });
+});
+
+app.get('/customer/login', (req, res) => {
+    getSettings((settings) => {
+        const error = req.query.error || '';
+        const success = req.query.success || '';
+        const content = `
+            <div class="card" style="max-width: 400px; margin: 0 auto;">
+                <h2>Customer Login</h2>
+                ${error ? `<div class="alert alert-error">${error}</div>` : ''}
+                ${success ? `<div class="alert alert-success">${success}</div>` : ''}
+                <form action="/customer/login" method="POST">
+                    <div class="form-group"><label>Username</label><input type="text" name="username" required></div>
+                    <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
+                    <button type="submit" class="btn" style="width: 100%;">Login</button>
+                </form>
+                <p class="text-center mt-2"><a href="/customer/register">Don't have an account? Register</a></p>
+            </div>
+        `;
+        res.send(renderLayout('Customer Login', content, 'guest', settings));
     });
 });
 
 app.post('/customer/login', (req, res) => {
     const { username, password } = req.body;
-    db.get(`SELECT * FROM users WHERE username = ? OR email = ?`, [username, username], async (err, user) => {
-        if (user && await bcrypt.compare(password, user.password)) {
-            req.session.userId = user.id;
-            req.session.userName = user.full_name;
-            res.redirect('/customer');
+    db.get("SELECT * FROM users WHERE username = ?", [username], (err, user) => {
+        if (user && bcrypt.compareSync(password, user.password)) {
+            req.session.user = user;
+            res.redirect('/customer/dashboard');
         } else {
-            res.redirect('/customer/login?error=1');
+            res.redirect('/customer/login?error=' + encodeURIComponent('Invalid username or password.'));
         }
     });
 });
 
-app.get('/customer/register', (req, res) => {
-    getSettings(settings => {
-        res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Customer Registration - ${settings.business_name}</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-        </head>
-        <body class="bg-gray-100 flex items-center justify-center min-h-screen py-10">
-            <div class="max-w-md w-full bg-white p-8 rounded-xl shadow-md">
-                <div class="text-center mb-6">
-                    <h1 class="text-2xl font-bold text-blue-900">Create Account</h1>
-                    <p class="text-sm text-gray-600 mt-1">Register for government application assistance</p>
-                </div>
-                ${req.query.error ? `<div class="mb-4 p-3 bg-red-100 text-red-700 text-sm rounded">${req.query.error}</div>` : ''}
-                <form method="POST" action="/customer/register" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Full Name</label>
-                        <input type="text" name="full_name" required class="w-full border p-2 rounded mt-1">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Email Address</label>
-                        <input type="email" name="email" required class="w-full border p-2 rounded mt-1">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Mobile Number</label>
-                        <input type="text" name="mobile_number" placeholder="09XXXXXXXXX" required class="w-full border p-2 rounded mt-1">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Username</label>
-                        <input type="text" name="username" required class="w-full border p-2 rounded mt-1">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Password</label>
-                        <input type="password" name="password" required class="w-full border p-2 rounded mt-1">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Confirm Password</label>
-                        <input type="password" name="confirm_password" required class="w-full border p-2 rounded mt-1">
-                    </div>
-                    <button type="submit" class="w-full bg-blue-600 text-white p-2 rounded font-medium hover:bg-blue-700">Register</button>
-                </form>
-                <div class="mt-4 text-center text-sm">
-                    <p class="text-gray-600">Already have an account? <a href="/customer/login" class="text-blue-600 font-medium hover:underline">Login here</a></p>
-                </div>
-            </div>
-        </body>
-        </html>
-        `);
-    });
-});
-
-app.post('/customer/register', async (req, res) => {
-    const { full_name, email, mobile_number, username, password, confirm_password } = req.body;
-    if (password !== confirm_password) {
-        return res.redirect('/customer/register?error=Passwords do not match');
-    }
-    try {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        db.run(`INSERT INTO users (full_name, email, mobile_number, username, password) VALUES (?, ?, ?, ?, ?)`,
-            [full_name, email, mobile_number, username, hashedPassword], function(err) {
-                if (err) {
-                    return res.redirect('/customer/register?error=Username or Email already exists');
-                }
-                // Add notification
-                db.run(`INSERT INTO notifications (user_id, message) VALUES (?, ?)`, [this.lastID, 'Welcome! Your account has been successfully created.']);
-                res.redirect('/customer/login?registered=1');
-            });
-    } catch (e) {
-        res.redirect('/customer/register?error=Registration failed');
-    }
-});
-
 app.get('/customer/logout', (req, res) => {
-    req.session.destroy(() => res.redirect('/customer/login'));
+    req.session.destroy(() => res.redirect('/'));
 });
 
-// Customer Authentication Middleware
-function requireCustomer(req, res, next) {
-    if (!req.session.userId) return res.redirect('/customer/login');
-    next();
-}
-
-// Customer Portal Home & Dashboard
-app.get('/customer', requireCustomer, (req, res) => {
-    db.serialize(() => {
-        db.all(`SELECT * FROM applications WHERE user_id = ? ORDER BY created_at DESC`, [req.session.userId], (err, apps) => {
-            db.all(`SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC`, [req.session.userId], (err, notifs) => {
-                getSettings(settings => {
-                    const unreadCount = notifs.filter(n => n.is_read === 0).length;
-                    
-                    res.send(`
-                    <!DOCTYPE html>
-                    <html lang="en">
-                    <head>
-                        <meta charset="UTF-8">
-                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                        <title>Customer Dashboard - ${settings.business_name}</title>
-                        <script src="https://cdn.tailwindcss.com"></script>
-                        <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-                    </head>
-                    <body class="bg-gray-100 font-sans">
-                        <div class="min-h-screen flex flex-col">
-                            <!-- Header -->
-                            <header class="bg-blue-900 text-white shadow-md">
-                                <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-                                    <div class="flex items-center space-x-3">
-                                        <h1 class="text-xl font-bold">${settings.business_name}</h1>
-                                    </div>
-                                    <div class="flex items-center space-x-4">
-                                        <span class="text-sm">Hello, ${req.session.userName}</span>
-                                        <a href="/customer/logout" class="bg-red-600 px-3 py-1 rounded text-sm hover:bg-red-700"><i class="fas.fa-sign-out-alt"></i> Logout</a>
-                                    </div>
-                                </div>
-                            </header>
-
-                            <!-- Main Content -->
-                            <div class="max-w-7xl mx-auto px-4 py-6 flex-1 w-full grid grid-cols-1 md:grid-cols-4 gap-6">
-                                <!-- Sidebar Links -->
-                                <div class="bg-white p-4 rounded-xl shadow-sm h-fit space-y-2">
-                                    <a href="/customer" class="block p-2 rounded bg-blue-50 text-blue-700 font-medium"><i class="fas fa-home mr-2"></i> Dashboard</a>
-                                    <a href="/customer/apply" class="block p-2 rounded hover:bg-gray-50 text-gray-700"><i class="fas fa-file-alt mr-2"></i> New Application</a>
-                                    <a href="/customer/profile" class="block p-2 rounded hover:bg-gray-50 text-gray-700"><i class="fas fa-user mr-2"></i> Profile & Password</a>
-                                    <a href="/track" target="_blank" class="block p-2 rounded hover:bg-gray-50 text-gray-700"><i class="fas fa-search mr-2"></i> Public Track</a>
-                                </div>
-
-                                <!-- Content Area -->
-                                <div class="md:col-span-3 space-y-6">
-                                    <!-- Notifications Bar -->
-                                    <div class="bg-white p-4 rounded-xl shadow-sm">
-                                        <h3 class="font-bold text-gray-800 mb-2 flex items-center justify-between">
-                                            <span><i class="fas fa-bell text-blue-600 mr-2"></i> Notifications</span>
-                                            ${unreadCount > 0 ? `<span class="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">${unreadCount} Unread</span>` : ''}
-                                        </h3>
-                                        <div class="space-y-2 max-h-40 overflow-y-auto">
-                                            ${notifs.length === 0 ? '<p class="text-sm text-gray-500">No notifications yet.</p>' : ''}
-                                            ${notifs.map(n => `
-                                                <div class="p-2 text-sm bg-gray-50 rounded border-l-4 ${n.is_read ? 'border-gray-300 text-gray-600' : 'border-blue-600 text-gray-800 font-medium'} flex justify-between">
-                                                    <span>${n.message}</span>
-                                                    <span class="text-xs text-gray-400 ml-2">${n.created_at}</span>
-                                                </div>
-                                            `).join('')}
-                                        </div>
-                                    </div>
-
-                                    <!-- My Applications -->
-                                    <div class="bg-white p-6 rounded-xl shadow-sm">
-                                        <div class="flex justify-between items-center mb-4">
-                                            <h3 class="font-bold text-lg text-gray-800">My Applications</h3>
-                                            <a href="/customer/apply" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700">+ New Application</a>
-                                        </div>
-                                        <div class="overflow-x-auto">
-                                            <table class="w-full text-left border-collapse text-sm">
-                                                <thead>
-                                                    <tr class="bg-gray-50 border-b">
-                                                        <th class="p-3">Tracking No.</th>
-                                                        <th class="p-3">Service</th>
-                                                        <th class="p-3">Status</th>
-                                                        <th class="p-3">Payment</th>
-                                                        <th class="p-3">Date Submitted</th>
-                                                        <th class="p-3">Action</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    ${apps.length === 0 ? `<tr><td colspan="6" class="p-4 text-center text-gray-500">No applications found. Click 'New Application' to start.</td></tr>` : ''}
-                                                    ${apps.map(app => `
-                                                        <tr class="border-b hover:bg-gray-50">
-                                                            <td class="p-3 font-mono font-bold text-blue-600">${app.tracking_number}</td>
-                                                            <td class="p-3 uppercase font-medium">${app.service_type}</td>
-                                                            <td class="p-3"><span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-semibold">${app.status}</span></td>
-                                                            <td class="p-3"><span class="px-2 py-1 rounded text-xs font-semibold ${app.payment_status === 'Paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">${app.payment_status}</span></td>
-                                                            <td class="p-3 text-gray-500">${app.created_at}</td>
-                                                            <td class="p-3">
-                                                                <a href="/customer/application/${app.id}" class="text-blue-600 hover:underline font-medium">View / Pay</a>
-                                                            </td>
-                                                        </tr>
-                                                    `).join('')}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Footer Disclaimer -->
-                            <footer class="bg-white border-t py-4 text-center text-xs text-gray-500 px-4">
-                                <p>${settings.terms}</p>
-                            </footer>
+// Customer Dashboard
+app.get('/customer/dashboard', (req, res) => {
+    if (!req.session.user) return res.redirect('/customer/login');
+    getSettings((settings) => {
+        db.all("SELECT * FROM applications WHERE user_id = ?", [req.session.user.id], (err, apps) => {
+            db.all("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 5", [req.session.user.id], (err2, notifs) => {
+                const content = `
+                    <div class="card">
+                        <h2>Welcome, ${req.session.user.fullname}!</h2>
+                        <p style="color: #64748b;">Manage your government assistance applications from your dashboard.</p>
+                        <div class="mt-2" style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                            <a href="/customer/apply" class="btn">✨ New Application</a>
+                            <a href="/customer/notifications" class="btn btn-secondary">Notifications</a>
+                            <a href="/customer/profile" class="btn btn-secondary">My Profile</a>
                         </div>
-                    </body>
-                    </html>
-                    `);
-                });
+                    </div>
+                    
+                    <div class="card">
+                        <h3>My Applications</h3>
+                        ${apps && apps.length > 0 ? `
+                            <table>
+                                <tr>
+                                    <th>Tracking No.</th>
+                                    <th>Service</th>
+                                    <th>Status</th>
+                                    <th>Payment</th>
+                                    <th>Date</th>
+                                    <th>Action</th>
+                                </tr>
+                                ${apps.map(a => `
+                                    <tr>
+                                        <td><strong>${a.tracking_number}</strong></td>
+                                        <td>${a.service_type}</td>
+                                        <td><span class="badge badge-${a.status.toLowerCase().replace(/\s+/g, '-')}">${a.status}</span></td>
+                                        <td><span class="badge badge-${a.payment_status.toLowerCase().replace(/\s+/g, '-')}">${a.payment_status}</span></td>
+                                        <td>${a.created_at}</td>
+                                        <td>
+                                            <a href="/customer/application/${a.id}" class="btn btn-sm">View Details</a>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </table>
+                        ` : `<p style="color: #64748b; margin-top: 1rem;">You have no applications yet. Click "New Application" to start.</p>`}
+                    </div>
+
+                    <div class="card">
+                        <h3>Recent Notifications</h3>
+                        ${notifs && notifs.length > 0 ? `
+                            <ul>
+                                ${notifs.map(n => `<li style="margin-bottom: 0.5rem; font-size: 0.95rem;">${n.message} <small style="color: #64748b;">(${n.created_at})</small></li>`).join('')}
+                            </ul>
+                        ` : `<p style="color: #64748b; margin-top: 1rem;">No recent notifications.</p>`}
+                    </div>
+                `;
+                res.send(renderLayout('Customer Dashboard', content, 'customer', settings));
             });
         });
     });
 });
 
-// ---------------------------------------------------------
-// CUSTOMER APPLICATION WIZARD (9 STEPS)
-// ---------------------------------------------------------
-app.get('/customer/apply', requireCustomer, (req, res) => {
-    getSettings(settings => {
-        res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>New Application - ${settings.business_name}</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-        </head>
-        <body class="bg-gray-100 font-sans py-10">
-            <div class="max-w-3xl mx-auto bg-white p-8 rounded-xl shadow-md">
-                <div class="mb-6 border-b pb-4 flex justify-between items-center">
-                    <div>
-                        <h1 class="text-2xl font-bold text-blue-900">New Government Application</h1>
-                        <p class="text-sm text-gray-600">Select service and complete the step-by-step wizard.</p>
+// Customer New Application Form (Multi-step wizard UI handled via standard form submission)
+app.get('/customer/apply', (req, res) => {
+    if (!req.session.user) return res.redirect('/customer/login');
+    getSettings((settings) => {
+        const content = `
+            <div class="card" style="max-width: 800px; margin: 0 auto;">
+                <h2>New Government Application Assistance</h2>
+                <p style="color: #64748b; margin-bottom: 1.5rem;">Complete the multi-step wizard to submit your application details and documents.</p>
+                <form action="/customer/apply" method="POST" enctype="multipart/form-data">
+                    
+                    <!-- SERVICE SELECTION -->
+                    <div class="form-group">
+                        <label>Select Government Service *</label>
+                        <select name="service_type" required>
+                            <option value="BIR / TIN">BIR / TIN Application (Fee: ₱${settings.tin_fee})</option>
+                            <option value="SSS">SSS Application (Fee: ₱${settings.sss_fee})</option>
+                            <option value="Pag-IBIG">Pag-IBIG Application (Fee: ₱${settings.pagibig_fee})</option>
+                        </select>
                     </div>
-                    <a href="/customer" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></a>
-                </div>
+                    
+                    <hr style="margin: 1.5rem 0; border: 0; border-top: 1px solid #e2e8f0;">
 
-                <form id="wizardForm" method="POST" action="/customer/apply" enctype="multipart/form-data">
-                    <!-- Step 0: Select Service -->
-                    <div class="wizard-step" data-step="0">
-                        <h2 class="text-lg font-bold text-gray-800 mb-4">Select Service Type</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                            <label class="border p-4 rounded-xl cursor-pointer hover:border-blue-600 flex flex-col items-center text-center">
-                                <input type="radio" name="service_type" value="bir" required class="mb-2" onchange="updateFees('bir')">
-                                <span class="font-bold text-blue-900">BIR / TIN</span>
-                                <span class="text-xs text-gray-500 mt-1">Tax Identification Number Application & Assistance</span>
-                                <span class="text-sm font-semibold text-green-600 mt-2">Fee: ₱${settings.bir_fee}</span>
-                            </label>
-                            <label class="border p-4 rounded-xl cursor-pointer hover:border-blue-600 flex flex-col items-center text-center">
-                                <input type="radio" name="service_type" value="sss" required class="mb-2" onchange="updateFees('sss')">
-                                <span class="font-bold text-blue-900">SSS APPLICATION</span>
-                                <span class="text-xs text-gray-500 mt-1">Social Security System Registration & Assistance</span>
-                                <span class="text-sm font-semibold text-green-600 mt-2">Fee: ₱${settings.sss_fee}</span>
-                            </label>
-                            <label class="border p-4 rounded-xl cursor-pointer hover:border-blue-600 flex flex-col items-center text-center">
-                                <input type="radio" name="service_type" value="pagibig" required class="mb-2" onchange="updateFees('pagibig')">
-                                <span class="font-bold text-blue-900">PAG-IBIG APPLICATION</span>
-                                <span class="text-xs text-gray-500 mt-1">HDMF Pag-IBIG Membership Registration</span>
-                                <span class="text-sm font-semibold text-green-600 mt-2">Fee: ₱${settings.pagibig_fee}</span>
-                            </label>
-                        </div>
-                        <div class="flex justify-end">
-                            <button type="button" onclick="nextStep(1)" class="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700">Next Step <i class="fas fa-arrow-right ml-1"></i></button>
-                        </div>
+                    <!-- STEP 1: PERSONAL INFORMATION -->
+                    <h3>Step 1: Personal Information</h3>
+                    <div class="grid-2">
+                        <div class="form-group"><label>First Name</label><input type="text" name="firstname" required></div>
+                        <div class="form-group"><label>Middle Name</label><input type="text" name="middlename"></div>
+                        <div class="form-group"><label>Last Name</label><input type="text" name="lastname" required></div>
+                        <div class="form-group"><label>Suffix (Jr., Sr., III)</label><input type="text" name="suffix"></div>
+                        <div class="form-group"><label>Date of Birth</label><input type="date" name="dob" required></div>
+                        <div class="form-group"><label>Place of Birth</label><input type="text" name="pob" required></div>
+                        <div class="form-group"><label>Sex</label><select name="sex"><option value="Male">Male</option><option value="Female">Female</option></select></div>
+                        <div class="form-group"><label>Civil Status</label><select name="civil_status" id="civilStatusSelect" onchange="toggleSpouse()"><option value="Single">Single</option><option value="Married">Married</option><option value="Widowed">Widowed</option><option value="Separated">Separated</option></select></div>
+                        <div class="form-group"><label>Nationality</label><input type="text" name="nationality" value="Filipino" required></div>
+                        <div class="form-group"><label>Mobile Number</label><input type="text" name="mobile" value="${req.session.user.mobile}" required></div>
+                        <div class="form-group"><label>Email Address</label><input type="email" name="email" value="${req.session.user.email}" required></div>
                     </div>
 
-                    <!-- Step 1: Personal Information -->
-                    <div class="wizard-step hidden" data-step="1">
-                        <h2 class="text-lg font-bold text-gray-800 mb-4">Step 1: Personal Information</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                            <div><label class="block text-sm font-medium">First Name *</label><input type="text" name="first_name" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Middle Name</label><input type="text" name="middle_name" class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Last Name *</label><input type="text" name="last_name" required class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                            <div><label class="block text-sm font-medium">Suffix (Jr, Sr, III)</label><input type="text" name="suffix" class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Date of Birth *</label><input type="date" name="dob" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Place of Birth *</label><input type="text" name="pob" required class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                            <div>
-                                <label class="block text-sm font-medium">Sex *</label>
-                                <select name="sex" required class="w-full border p-2 rounded mt-1">
-                                    <option value="">Select Sex</option>
-                                    <option value="Male">Male</option>
-                                    <option value="Female">Female</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium">Civil Status *</label>
-                                <select name="civil_status" id="civilStatusSelect" required onchange="toggleSpouseSection()" class="w-full border p-2 rounded mt-1">
-                                    <option value="">Select Status</option>
-                                    <option value="Single">Single</option>
-                                    <option value="Married">Married</option>
-                                    <option value="Widowed">Widowed</option>
-                                    <option value="Separated">Separated</option>
-                                </select>
-                            </div>
-                            <div><label class="block text-sm font-medium">Nationality *</label><input type="text" name="nationality" value="Filipino" required class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                            <div><label class="block text-sm font-medium">Mobile Number *</label><input type="text" name="mobile" placeholder="09XXXXXXXXX" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Email Address *</label><input type="email" name="email" required class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div class="flex justify-between">
-                            <button type="button" onclick="prevStep(0)" class="bg-gray-300 text-gray-700 px-6 py-2 rounded font-medium hover:bg-gray-400"><i class="fas fa-arrow-left mr-1"></i> Back</button>
-                            <button type="button" onclick="nextStep(2)" class="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700">Next Step <i class="fas fa-arrow-right ml-1"></i></button>
+                    <hr style="margin: 1.5rem 0; border: 0; border-top: 1px solid #e2e8f0;">
+
+                    <!-- STEP 2: ADDRESS -->
+                    <h3>Step 2: Complete Address</h3>
+                    <div class="grid-2">
+                        <div class="form-group"><label>House / Block / Lot No.</label><input type="text" name="house"></div>
+                        <div class="form-group"><label>Street</label><input type="text" name="street"></div>
+                        <div class="form-group"><label>Barangay</label><input type="text" name="barangay" required></div>
+                        <div class="form-group"><label>Municipality / City</label><input type="text" name="municipality" required></div>
+                        <div class="form-group"><label>Province</label><input type="text" name="province" required></div>
+                        <div class="form-group"><label>ZIP Code</label><input type="text" name="zipcode" required></div>
+                    </div>
+
+                    <hr style="margin: 1.5rem 0; border: 0; border-top: 1px solid #e2e8f0;">
+
+                    <!-- STEP 3: PARENTS INFORMATION -->
+                    <h3>Step 3: Parents Information</h3>
+                    <h4>Father's Details</h4>
+                    <div class="grid-2">
+                        <div class="form-group"><label>First Name</label><input type="text" name="father_firstname"></div>
+                        <div class="form-group"><label>Middle Name</label><input type="text" name="father_middlename"></div>
+                        <div class="form-group"><label>Last Name</label><input type="text" name="father_lastname"></div>
+                        <div class="form-group"><label>Date of Birth</label><input type="date" name="father_dob"></div>
+                    </div>
+                    <h4>Mother's Details</h4>
+                    <div class="grid-2">
+                        <div class="form-group"><label>First Name</label><input type="text" name="mother_firstname"></div>
+                        <div class="form-group"><label>Middle Name</label><input type="text" name="mother_middlename"></div>
+                        <div class="form-group"><label>Maiden Name</label><input type="text" name="mother_maidenname"></div>
+                        <div class="form-group"><label>Last Name</label><input type="text" name="mother_lastname"></div>
+                        <div class="form-group"><label>Date of Birth</label><input type="date" name="mother_dob"></div>
+                    </div>
+
+                    <!-- SPOUSE SECTION (Conditional) -->
+                    <div id="spouseSection" style="display:none; margin-top: 1.5rem;">
+                        <hr style="margin: 1.5rem 0; border: 0; border-top: 1px solid #e2e8f0;">
+                        <h3>Spouse Information</h3>
+                        <div class="grid-2">
+                            <div class="form-group"><label>Spouse Full Name</label><input type="text" name="spouse_fullname"></div>
+                            <div class="form-group"><label>Spouse Date of Birth</label><input type="date" name="spouse_dob"></div>
+                            <div class="form-group"><label>Marriage Certificate (Upload)</label><input type="file" name="marriage_cert" accept="image/*,.pdf"></div>
                         </div>
                     </div>
 
-                    <!-- Step 2: Address -->
-                    <div class="wizard-step hidden" data-step="2">
-                        <h2 class="text-lg font-bold text-gray-800 mb-4">Step 2: Complete Address</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                            <div><label class="block text-sm font-medium">House / Block / Lot No.</label><input type="text" name="house_block_lot" class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Street</label><input type="text" name="street" class="w-full border p-2 rounded mt-1"></div>
+                    <hr style="margin: 1.5rem 0; border: 0; border-top: 1px solid #e2e8f0;">
+
+                    <!-- STEP 4: BENEFICIARIES / DEPENDENTS -->
+                    <h3>Step 4: Beneficiaries / Dependents</h3>
+                    <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 1rem;">Add qualified beneficiaries (Parents, Spouse, Children, Siblings, etc.).</p>
+                    <div id="beneficiariesContainer">
+                        <div class="card" style="background: #f8fafc; border: 1px dashed #cbd5e1; margin-bottom: 1rem; padding: 1rem;">
+                            <div class="grid-2">
+                                <div class="form-group"><label>Beneficiary Full Name</label><input type="text" name="ben_name[]"></div>
+                                <div class="form-group"><label>Relationship</label><input type="text" name="ben_relationship[]" placeholder="e.g. Child, Parent"></div>
+                                <div class="form-group"><label>Date of Birth</label><input type="date" name="ben_dob[]"></div>
+                                <div class="form-group"><label>Sex</label><select name="ben_sex[]"><option value="Male">Male</option><option value="Female">Female</option></select></div>
+                            </div>
+                            <div class="form-group"><label>Address</label><input type="text" name="ben_address[]"></div>
                         </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                            <div><label class="block text-sm font-medium">Barangay *</label><input type="text" name="barangay" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Municipality / City *</label><input type="text" name="municipality_city" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Province *</label><input type="text" name="province" required class="w-full border p-2 rounded mt-1"></div>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addBeneficiary()">+ Add Another Beneficiary</button>
+
+                    <hr style="margin: 1.5rem 0; border: 0; border-top: 1px solid #e2e8f0;">
+
+                    <!-- STEP 5: EMPLOYMENT INFORMATION -->
+                    <h3>Step 5: Employment Information</h3>
+                    <div class="grid-2">
+                        <div class="form-group"><label>Employment Status</label><select name="emp_status" id="empStatusSelect" onchange="toggleEmp()"><option value="Employed">Employed</option><option value="Self-Employed">Self-Employed</option><option value="Unemployed">Unemployed</option></select></div>
+                        <div class="form-group employed-field"><label>Employer Name</label><input type="text" name="employer_name"></div>
+                        <div class="form-group employed-field"><label>Employer Address</label><input type="text" name="employer_address"></div>
+                        <div class="form-group employed-field"><label>Employer Contact Number</label><input type="text" name="employer_contact"></div>
+                        <div class="form-group employed-field"><label>Occupation / Position</label><input type="text" name="occupation"></div>
+                        <div class="form-group employed-field"><label>Monthly Income</label><input type="text" name="monthly_income"></div>
+                        <div class="form-group employed-field"><label>Date Started</label><input type="date" name="date_started"></div>
+                        <div class="form-group self-employed-field" style="display:none;"><label>Business Name</label><input type="text" name="business_name"></div>
+                        <div class="form-group self-employed-field" style="display:none;"><label>Business Address</label><input type="text" name="business_address"></div>
+                    </div>
+
+                    <hr style="margin: 1.5rem 0; border: 0; border-top: 1px solid #e2e8f0;">
+
+                    <!-- STEP 6: DOCUMENTS & CAMERA UPLOAD -->
+                    <h3>Step 6: Required Documents</h3>
+                    <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 1rem;">Take a photo using your device camera or upload files from your device.</p>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label>Valid Government ID (Front/Back)</label>
+                            <input type="file" name="valid_id" accept="image/*,.pdf" capture="environment" required>
+                            <small style="color: #64748b;">Mobile users can take a photo directly.</small>
                         </div>
-                        <div class="mb-6">
-                            <div class="w-full md:w-1/3"><label class="block text-sm font-medium">ZIP Code *</label><input type="text" name="zip_code" required class="w-full border p-2 rounded mt-1"></div>
+                        <div class="form-group">
+                            <label>Photo of You Holding Your Valid ID</label>
+                            <input type="file" name="photo_holding_id" accept="image/*" capture="user" required>
+                            <small style="color: #64748b;">Clear picture of yourself holding the uploaded ID.</small>
                         </div>
-                        <div class="flex justify-between">
-                            <button type="button" onclick="prevStep(1)" class="bg-gray-300 text-gray-700 px-6 py-2 rounded font-medium hover:bg-gray-400"><i class="fas fa-arrow-left mr-1"></i> Back</button>
-                            <button type="button" onclick="nextStep(3)" class="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700">Next Step <i class="fas fa-arrow-right ml-1"></i></button>
+                        <div class="form-group">
+                            <label>ID Picture (2x2 or Passport size)</label>
+                            <input type="file" name="id_picture" accept="image/*" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Supporting Document / Birth Certificate</label>
+                            <input type="file" name="supporting_doc" accept="image/*,.pdf">
                         </div>
                     </div>
 
-                    <!-- Step 3: Parents Information -->
-                    <div class="wizard-step hidden" data-step="3">
-                        <h2 class="text-lg font-bold text-gray-800 mb-4">Step 3: Parents Information (Required for SSS / Pag-IBIG / BIR)</h2>
-                        <div class="mb-6 p-4 bg-gray-50 rounded-xl border">
-                            <h3 class="font-semibold text-blue-900 mb-3">Father's Information</h3>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-                                <div><label class="block text-sm font-medium">First Name</label><input type="text" name="father_first_name" class="w-full border p-2 rounded mt-1"></div>
-                                <div><label class="block text-sm font-medium">Middle Name</label><input type="text" name="father_middle_name" class="w-full border p-2 rounded mt-1"></div>
-                                <div><label class="block text-sm font-medium">Last Name</label><input type="text" name="father_last_name" class="w-full border p-2 rounded mt-1"></div>
-                            </div>
-                            <div><label class="block text-sm font-medium">Father's Date of Birth</label><input type="date" name="father_dob" class="w-full md:w-1/3 border p-2 rounded mt-1"></div>
-                        </div>
+                    <hr style="margin: 1.5rem 0; border: 0; border-top: 1px solid #e2e8f0;">
 
-                        <div class="mb-6 p-4 bg-gray-50 rounded-xl border">
-                            <h3 class="font-semibold text-blue-900 mb-3">Mother's Information</h3>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-                                <div><label class="block text-sm font-medium">First Name</label><input type="text" name="mother_first_name" class="w-full border p-2 rounded mt-1"></div>
-                                <div><label class="block text-sm font-medium">Middle Name</label><input type="text" name="mother_middle_name" class="w-full border p-2 rounded mt-1"></div>
-                                <div><label class="block text-sm font-medium">Maiden Name</label><input type="text" name="mother_maiden_name" class="w-full border p-2 rounded mt-1"></div>
-                            </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div><label class="block text-sm font-medium">Last Name</label><input type="text" name="mother_last_name" class="w-full border p-2 rounded mt-1"></div>
-                                <div><label class="block text-sm font-medium">Mother's Date of Birth</label><input type="date" name="mother_dob" class="w-full border p-2 rounded mt-1"></div>
-                            </div>
+                    <!-- STEP 7: PAYMENT METHOD -->
+                    <h3>Step 7: Payment Method</h3>
+                    <div class="form-group">
+                        <label>Select Payment Option</label>
+                        <select name="payment_method" id="paymentMethodSelect" onchange="togglePayment()" required>
+                            <option value="GCash">GCash</option>
+                            <option value="Cash">Cash Payment</option>
+                        </select>
+                    </div>
+
+                    <div id="gcashPaymentBox" class="card" style="background: #f8fafc; border: 1px solid #cbd5e1;">
+                        <h4>GCash Payment Instructions</h4>
+                        <p style="margin-bottom: 0.5rem;">Scan the QR code below or send payment to the GCash account:</p>
+                        <p><strong>Account Name:</strong> ${settings.gcash_account_name}</p>
+                        <p><strong>GCash Number:</strong> ${settings.gcash_number}</p>
+                        ${settings.gcash_qr ? `<div class="mt-2"><img src="/uploads/${settings.gcash_qr}" alt="GCash QR" style="max-width: 200px; border-radius: 6px;"></div>` : '<p style="color: #d97706; margin-top:0.5rem;">[GCash QR Code will be displayed once configured by Admin]</p>'}
+                        <div class="form-group mt-2">
+                            <label>Upload GCash Payment Screenshot / Proof</label>
+                            <input type="file" name="gcash_proof" accept="image/*">
                         </div>
-                        <div class="flex justify-between">
-                            <button type="button" onclick="prevStep(2)" class="bg-gray-300 text-gray-700 px-6 py-2 rounded font-medium hover:bg-gray-400"><i class="fas fa-arrow-left mr-1"></i> Back</button>
-                            <button type="button" onclick="nextStep(4)" class="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700">Next Step <i class="fas fa-arrow-right ml-1"></i></button>
+                        <div class="form-group">
+                            <label>Reference Number</label>
+                            <input type="text" name="reference_number" placeholder="Enter GCash Ref No.">
                         </div>
                     </div>
 
-                    <!-- Step 4: Beneficiaries / Dependents -->
-                    <div class="wizard-step hidden" data-step="4">
-                        <h2 class="text-lg font-bold text-gray-800 mb-2">Step 4: Beneficiaries / Dependents</h2>
-                        <p class="text-sm text-gray-600 mb-4">You can add multiple beneficiaries. Click "+ Add Beneficiary" for each.</p>
-                        
-                        <div id="beneficiariesContainer" class="space-y-4 mb-4">
-                            <div class="beneficiary-item p-4 bg-gray-50 rounded-xl border relative">
-                                <h3 class="font-semibold text-gray-700 mb-2">Beneficiary 1</h3>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-                                    <div><label class="block text-sm font-medium">Full Name *</label><input type="text" name="ben_full_name[]" required class="w-full border p-2 rounded mt-1"></div>
-                                    <div><label class="block text-sm font-medium">Relationship *</label><input type="text" name="ben_relationship[]" placeholder="e.g. Spouse, Child, Parent" required class="w-full border p-2 rounded mt-1"></div>
-                                    <div><label class="block text-sm font-medium">Date of Birth *</label><input type="date" name="ben_dob[]" required class="w-full border p-2 rounded mt-1"></div>
-                                </div>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label class="block text-sm font-medium">Sex *</label>
-                                        <select name="ben_sex[]" required class="w-full border p-2 rounded mt-1">
-                                            <option value="Male">Male</option>
-                                            <option value="Female">Female</option>
-                                        </select>
-                                    </div>
-                                    <div><label class="block text-sm font-medium">Address *</label><input type="text" name="ben_address[]" required class="w-full border p-2 rounded mt-1"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <button type="button" onclick="addBeneficiary()" class="bg-green-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-green-700 mb-6"><i class="fas fa-plus mr-1"></i> Add Beneficiary</button>
-
-                        <div class="flex justify-between">
-                            <button type="button" onclick="prevStep(3)" class="bg-gray-300 text-gray-700 px-6 py-2 rounded font-medium hover:bg-gray-400"><i class="fas fa-arrow-left mr-1"></i> Back</button>
-                            <button type="button" onclick="nextStep(5)" class="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700">Next Step <i class="fas fa-arrow-right ml-1"></i></button>
-                        </div>
+                    <div id="cashPaymentBox" class="card" style="background: #f8fafc; border: 1px solid #cbd5e1; display:none;">
+                        <h4>Cash Payment Instructions</h4>
+                        <p>${settings.cash_instructions}</p>
                     </div>
 
-                    <!-- Step 5: Employment Information -->
-                    <div class="wizard-step hidden" data-step="5">
-                        <h2 class="text-lg font-bold text-gray-800 mb-4">Step 5: Employment Information</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <label class="block text-sm font-medium">Employment Status *</label>
-                                <select name="employment_status" id="empStatus" required onchange="toggleEmploymentFields()" class="w-full border p-2 rounded mt-1">
-                                    <option value="">Select Status</option>
-                                    <option value="Employed">Employed</option>
-                                    <option value="Self-Employed">Self-Employed</option>
-                                    <option value="Unemployed">Unemployed</option>
-                                    <option value="Freelancer">Freelancer</option>
-                                </select>
-                            </div>
-                            <div><label class="block text-sm font-medium">Monthly Income (₱)</label><input type="text" name="monthly_income" class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div id="employerSection" class="space-y-4 mb-4 hidden p-4 bg-gray-50 rounded-xl border">
-                            <h3 class="font-semibold text-blue-900">Employer Details</h3>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div><label class="block text-sm font-medium">Employer Name</label><input type="text" name="employer_name" class="w-full border p-2 rounded mt-1"></div>
-                                <div><label class="block text-sm font-medium">Employer Contact Number</label><input type="text" name="employer_contact" class="w-full border p-2 rounded mt-1"></div>
-                            </div>
-                            <div><label class="block text-sm font-medium">Employer Address</label><input type="text" name="employer_address" class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div id="selfEmployedSection" class="space-y-4 mb-4 hidden p-4 bg-gray-50 rounded-xl border">
-                            <h3 class="font-semibold text-blue-900">Business Details</h3>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div><label class="block text-sm font-medium">Business Name</label><input type="text" name="business_name" class="w-full border p-2 rounded mt-1"></div>
-                                <div><label class="block text-sm font-medium">Date Started</label><input type="date" name="date_started" class="w-full border p-2 rounded mt-1"></div>
-                            </div>
-                            <div><label class="block text-sm font-medium">Business Address</label><input type="text" name="business_address" class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                            <div><label class="block text-sm font-medium">Occupation</label><input type="text" name="occupation" class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Position</label><input type="text" name="position" class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div class="flex justify-between">
-                            <button type="button" onclick="prevStep(4)" class="bg-gray-300 text-gray-700 px-6 py-2 rounded font-medium hover:bg-gray-400"><i class="fas fa-arrow-left mr-1"></i> Back</button>
-                            <button type="button" onclick="nextStep(6)" class="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700">Next Step <i class="fas fa-arrow-right ml-1"></i></button>
-                        </div>
+                    <div class="form-group mt-2">
+                        <label style="display: flex; align-items: center; gap: 10px; font-weight: normal; cursor: pointer;">
+                            <input type="checkbox" required style="width: auto;">
+                            <span>I confirm that the information I provided is correct and complete.</span>
+                        </label>
                     </div>
 
-                    <!-- Step 6: Civil Status & Spouse (Conditional) -->
-                    <div class="wizard-step hidden" data-step="6">
-                        <h2 class="text-lg font-bold text-gray-800 mb-2">Step 6: Spouse Information & Marriage Certificate</h2>
-                        <p class="text-sm text-gray-600 mb-4">If you selected Married, please provide spouse details and upload your Marriage Certificate.</p>
-                        
-                        <div id="spouseWrapper" class="p-4 bg-gray-50 rounded-xl border mb-6">
-                            <div id="spouseNotMarriedMsg" class="text-sm text-gray-500">You are currently single/widowed/separated. Spouse information is not required.</div>
-                            <div id="spouseFields" class="space-y-4 hidden">
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div><label class="block text-sm font-medium">Spouse Full Name</label><input type="text" name="spouse_full_name" class="w-full border p-2 rounded mt-1"></div>
-                                    <div><label class="block text-sm font-medium">Spouse Date of Birth</label><input type="date" name="spouse_dob" class="w-full border p-2 rounded mt-1"></div>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium">Marriage Certificate (Take Photo or Upload)</label>
-                                    <input type="file" name="marriage_cert" accept="image/*,application/pdf" class="w-full border p-2 rounded mt-1 bg-white">
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="flex justify-between">
-                            <button type="button" onclick="prevStep(5)" class="bg-gray-300 text-gray-700 px-6 py-2 rounded font-medium hover:bg-gray-400"><i class="fas fa-arrow-left mr-1"></i> Back</button>
-                            <button type="button" onclick="nextStep(7)" class="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700">Next Step <i class="fas fa-arrow-right ml-1"></i></button>
-                        </div>
-                    </div>
-
-                    <!-- Step 7: Documents & Camera Upload -->
-                    <div class="wizard-step hidden" data-step="7">
-                        <h2 class="text-lg font-bold text-gray-800 mb-2">Step 7: Required Documents</h2>
-                        <p class="text-sm text-gray-600 mb-4">Upload a valid ID, your photo holding the ID, and ID picture.</p>
-                        
-                        <div class="space-y-4 mb-6">
-                            <div>
-                                <label class="block text-sm font-medium">Select Valid ID Type *</label>
-                                <select name="valid_id_type" required class="w-full border p-2 rounded mt-1 mb-2">
-                                    <option value="National ID">National ID (PhilID)</option>
-                                    <option value="Driver's License">Driver's License</option>
-                                    <option value="Passport">Passport</option>
-                                    <option value="UMID">UMID</option>
-                                    <option value="Postal ID">Postal ID</option>
-                                    <option value="Other Valid Govt ID">Other Valid Government ID</option>
-                                </select>
-                            </div>
-
-                            <div class="p-4 bg-gray-50 rounded-xl border">
-                                <label class="block text-sm font-bold text-gray-800 mb-1">Valid ID Upload (Front / Back) *</label>
-                                <p class="text-xs text-gray-500 mb-2">Use "Take Photo" on mobile or upload file.</p>
-                                <input type="file" name="valid_id" accept="image/*" capture="environment" required class="w-full border p-2 rounded bg-white">
-                            </div>
-
-                            <div class="p-4 bg-gray-50 rounded-xl border">
-                                <label class="block text-sm font-bold text-gray-800 mb-1">Photo of You Holding Your Valid ID *</label>
-                                <p class="text-xs text-gray-500 mb-2">Take a clear picture of yourself while holding the same ID you uploaded.</p>
-                                <input type="file" name="photo_holding_id" accept="image/*" capture="user" required class="w-full border p-2 rounded bg-white">
-                            </div>
-
-                            <div class="p-4 bg-gray-50 rounded-xl border">
-                                <label class="block text-sm font-bold text-gray-800 mb-1">2x2 ID Picture *</label>
-                                <input type="file" name="id_picture" accept="image/*" required class="w-full border p-2 rounded bg-white">
-                            </div>
-                        </div>
-
-                        <div class="flex justify-between">
-                            <button type="button" onclick="prevStep(6)" class="bg-gray-300 text-gray-700 px-6 py-2 rounded font-medium hover:bg-gray-400"><i class="fas fa-arrow-left mr-1"></i> Back</button>
-                            <button type="button" onclick="nextStep(8)" class="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700">Next Step <i class="fas fa-arrow-right ml-1"></i></button>
-                        </div>
-                    </div>
-
-                    <!-- Step 8: Payment -->
-                    <div class="wizard-step hidden" data-step="8">
-                        <h2 class="text-lg font-bold text-gray-800 mb-2">Step 8: Payment Options</h2>
-                        <p class="text-sm text-gray-600 mb-4">Service Fee Amount to Pay: <span id="displayFee" class="font-bold text-green-600 text-lg">₱500</span></p>
-
-                        <div class="space-y-4 mb-6">
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="border p-4 rounded-xl cursor-pointer hover:border-blue-600 flex items-center space-x-3">
-                                    <input type="radio" name="payment_method" value="gcash" checked onchange="togglePaymentMethod('gcash')">
-                                    <div>
-                                        <span class="font-bold text-blue-900 block">GCash Payment</span>
-                                        <span class="text-xs text-gray-500">Scan QR or send to GCash number</span>
-                                    </div>
-                                </label>
-                                <label class="border p-4 rounded-xl cursor-pointer hover:border-blue-600 flex items-center space-x-3">
-                                    <input type="radio" name="payment_method" value="cash" onchange="togglePaymentMethod('cash')">
-                                    <div>
-                                        <span class="font-bold text-blue-900 block">Cash Payment</span>
-                                        <span class="text-xs text-gray-500">Pay at office or partner agents</span>
-                                    </div>
-                                </label>
-                            </div>
-
-                            <!-- GCash Box -->
-                            <div id="gcashBox" class="p-4 bg-blue-50 rounded-xl border border-blue-200">
-                                <h3 class="font-bold text-blue-900 mb-2">GCash Transfer Details</h3>
-                                <p class="text-sm text-gray-700">Account Name: <strong>${settings.gcash_account_name}</strong></p>
-                                <p class="text-sm text-gray-700 mb-3">GCash Number: <strong>${settings.gcash_number}</strong></p>
-                                ${settings.gcash_qr ? `<div class="mb-3"><img src="${settings.gcash_qr}" alt="GCash QR" class="w-48 h-48 object-cover border rounded"></div>` : '<p class="text-xs text-gray-500 mb-3">[Admin QR Code not uploaded yet. Use GCash Number above]</p>'}
-                                
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                    <div><label class="block text-xs font-medium">Reference Number *</label><input type="text" name="payment_ref" class="w-full border p-2 rounded text-sm mt-1"></div>
-                                    <div><label class="block text-xs font-medium">Amount Paid *</label><input type="number" name="amount_paid" class="w-full border p-2 rounded text-sm mt-1"></div>
-                                    <div><label class="block text-xs font-medium">Date Paid *</label><input type="date" name="date_paid" class="w-full border p-2 rounded text-sm mt-1"></div>
-                                </div>
-                                <div class="mt-3">
-                                    <label class="block text-xs font-medium">Upload Payment Screenshot / Proof *</label>
-                                    <input type="file" name="gcash_proof" accept="image/*" class="w-full border p-2 rounded text-sm bg-white mt-1">
-                                </div>
-                            </div>
-
-                            <!-- Cash Box -->
-                            <div id="cashBox" class="p-4 bg-yellow-50 rounded-xl border border-yellow-200 hidden">
-                                <h3 class="font-bold text-yellow-900 mb-2">Cash Payment Instructions</h3>
-                                <p class="text-sm text-gray-700">${settings.cash_instructions}</p>
-                            </div>
-                        </div>
-
-                        <div class="flex justify-between">
-                            <button type="button" onclick="prevStep(7)" class="bg-gray-300 text-gray-700 px-6 py-2 rounded font-medium hover:bg-gray-400"><i class="fas fa-arrow-left mr-1"></i> Back</button>
-                            <button type="button" onclick="nextStep(9)" class="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700">Review & Submit <i class="fas fa-arrow-right ml-1"></i></button>
-                        </div>
-                    </div>
-
-                    <!-- Step 9: Review & Submit -->
-                    <div class="wizard-step hidden" data-step="9">
-                        <h2 class="text-lg font-bold text-gray-800 mb-2">Step 9: Review & Submit</h2>
-                        <p class="text-sm text-gray-600 mb-4">Please verify your information before final submission.</p>
-
-                        <div class="p-4 bg-gray-50 rounded-xl border mb-6 text-sm space-y-2">
-                            <p><strong>Service Selected:</strong> <span id="revService" class="uppercase text-blue-600 font-bold"></span></p>
-                            <p><strong>Full Name:</strong> <span id="revName"></span></p>
-                            <p><strong>Mobile Number:</strong> <span id="revMobile"></span></p>
-                            <p><strong>Email Address:</strong> <span id="revEmail"></span></p>
-                            <p><strong>Civil Status:</strong> <span id="revCivil"></span></p>
-                            <p><strong>Payment Method:</strong> <span id="revPayment" class="uppercase"></span></p>
-                        </div>
-
-                        <div class="mb-6">
-                            <label class="flex items-center space-x-3 cursor-pointer">
-                                <input type="checkbox" required class="w-5 h-5 text-blue-600 rounded">
-                                <span class="text-sm font-medium text-gray-800">I confirm that the information I provided is correct and complete.</span>
-                            </label>
-                        </div>
-
-                        <div class="flex justify-between">
-                            <button type="button" onclick="prevStep(8)" class="bg-gray-300 text-gray-700 px-6 py-2 rounded font-medium hover:bg-gray-400"><i class="fas fa-arrow-left mr-1"></i> Back</button>
-                            <button type="submit" class="bg-green-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-green-700 text-lg shadow-md"><i class="fas fa-paper-plane mr-2"></i> Submit Application</button>
-                        </div>
-                    </div>
+                    <button type="submit" class="btn" style="width: 100%; margin-top: 1rem;">Submit Application</button>
                 </form>
             </div>
 
             <script>
-                const fees = { bir: ${settings.bir_fee}, sss: ${settings.sss_fee}, pagibig: ${settings.pagibig_fee} };
-                let currentStep = 0;
-
-                function updateFees(service) {
-                    const fee = fees[service] || 500;
-                    document.getElementById('displayFee').innerText = '₱' + fee;
-                }
-
-                function showStep(step) {
-                    document.querySelectorAll('.wizard-step').forEach(el => el.classList.add('hidden'));
-                    document.querySelector('.wizard-step[data-step="'+step+'"]').classList.remove('hidden');
-                    currentStep = step;
-                    window.scrollTo(0,0);
-                    if(step === 9) populateReview();
-                }
-
-                function nextStep(step) {
-                    // Simple validation for step 0
-                    if(step === 1) {
-                        const checked = document.querySelector('input[name="service_type"]:checked');
-                        if(!checked) { alert('Please select a service type.'); return; }
-                    }
-                    showStep(step);
-                }
-
-                function prevStep(step) { showStep(step); }
-
-                function toggleSpouseSection() {
+                function toggleSpouse() {
                     const status = document.getElementById('civilStatusSelect').value;
-                    const msg = document.getElementById('spouseNotMarriedMsg');
-                    const fields = document.getElementById('spouseFields');
-                    if(status === 'Married') {
-                        msg.classList.add('hidden');
-                        fields.classList.remove('hidden');
+                    const spouseBox = document.getElementById('spouseSection');
+                    if (status === 'Married') {
+                        spouseBox.style.display = 'block';
                     } else {
-                        msg.classList.remove('hidden');
-                        fields.classList.add('hidden');
+                        spouseBox.style.display = 'none';
                     }
                 }
-
+                function toggleEmp() {
+                    const status = document.getElementById('empStatusSelect').value;
+                    const employedFields = document.querySelectorAll('.employed-field');
+                    const selfFields = document.querySelectorAll('.self-employed-field');
+                    if (status === 'Employed') {
+                        employedFields.forEach(el => el.style.display = 'block');
+                        selfFields.forEach(el => el.style.display = 'none');
+                    } else if (status === 'Self-Employed') {
+                        employedFields.forEach(el => el.style.display = 'none');
+                        selfFields.forEach(el => el.style.display = 'block');
+                    } else {
+                        employedFields.forEach(el => el.style.display = 'none');
+                        selfFields.forEach(el => el.style.display = 'none');
+                    }
+                }
+                function togglePayment() {
+                    const method = document.getElementById('paymentMethodSelect').value;
+                    if (method === 'GCash') {
+                        document.getElementById('gcashPaymentBox').style.display = 'block';
+                        document.getElementById('cashPaymentBox').style.display = 'none';
+                    } else {
+                        document.getElementById('gcashPaymentBox').style.display = 'none';
+                        document.getElementById('cashPaymentBox').style.display = 'block';
+                    }
+                }
                 function addBeneficiary() {
                     const container = document.getElementById('beneficiariesContainer');
-                    const count = container.querySelectorAll('.beneficiary-item').length + 1;
                     const div = document.createElement('div');
-                    div.className = 'beneficiary-item p-4 bg-gray-50 rounded-xl border relative mt-3';
+                    div.className = 'card';
+                    div.style.cssText = 'background: #f8fafc; border: 1px dashed #cbd5e1; margin-bottom: 1rem; padding: 1rem;';
                     div.innerHTML = \`
-                        <div class="flex justify-between items-center mb-2">
-                            <h3 class="font-semibold text-gray-700">Beneficiary \${count}</h3>
-                            <button type="button" onclick="this.closest('.beneficiary-item').remove()" class="text-red-500 text-xs font-bold hover:underline">Remove</button>
+                        <div class="grid-2">
+                            <div class="form-group"><label>Beneficiary Full Name</label><input type="text" name="ben_name[]"></div>
+                            <div class="form-group"><label>Relationship</label><input type="text" name="ben_relationship[]"></div>
+                            <div class="form-group"><label>Date of Birth</label><input type="date" name="ben_dob[]"></div>
+                            <div class="form-group"><label>Sex</label><select name="ben_sex[]"><option value="Male">Male</option><option value="Female">Female</option></select></div>
                         </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-                            <div><label class="block text-sm font-medium">Full Name *</label><input type="text" name="ben_full_name[]" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Relationship *</label><input type="text" name="ben_relationship[]" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Date of Birth *</label><input type="date" name="ben_dob[]" required class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium">Sex *</label>
-                                <select name="ben_sex[]" required class="w-full border p-2 rounded mt-1">
-                                    <option value="Male">Male</option>
-                                    <option value="Female">Female</option>
-                                </select>
-                            </div>
-                            <div><label class="block text-sm font-medium">Address *</label><input type="text" name="ben_address[]" required class="w-full border p-2 rounded mt-1"></div>
-                        </div>
+                        <div class="form-group"><label>Address</label><input type="text" name="ben_address[]"></div>
+                        <button type="button" class="btn btn-danger btn-sm mt-1" onclick="this.parentElement.remove()">Remove Beneficiary</button>
                     \`;
                     container.appendChild(div);
                 }
-
-                function toggleEmploymentFields() {
-                    const status = document.getElementById('empStatus').value;
-                    const empSec = document.getElementById('employerSection');
-                    const selfSec = document.getElementById('selfEmployedSection');
-                    empSec.classList.add('hidden');
-                    selfSec.classList.add('hidden');
-                    if(status === 'Employed') empSec.classList.remove('hidden');
-                    if(status === 'Self-Employed' || status === 'Freelancer') selfSec.classList.remove('hidden');
-                }
-
-                function togglePaymentMethod(method) {
-                    const gcashBox = document.getElementById('gcashBox');
-                    const cashBox = document.getElementById('cashBox');
-                    if(method === 'gcash') {
-                        gcashBox.classList.remove('hidden');
-                        cashBox.classList.add('hidden');
-                    } else {
-                        gcashBox.classList.add('hidden');
-                        cashBox.classList.remove('hidden');
-                    }
-                }
-
-                function populateReview() {
-                    const form = document.getElementById('wizardForm');
-                    document.getElementById('revService').innerText = form.querySelector('input[name="service_type"]:checked').value;
-                    document.getElementById('revName').innerText = form.querySelector('input[name="first_name"]').value + ' ' + form.querySelector('input[name="last_name"]').value;
-                    document.getElementById('revMobile').innerText = form.querySelector('input[name="mobile"]').value;
-                    document.getElementById('revEmail').innerText = form.querySelector('input[name="email"]').value;
-                    document.getElementById('revCivil').innerText = form.querySelector('select[name="civil_status"]').value;
-                    document.getElementById('revPayment').innerText = form.querySelector('input[name="payment_method"]:checked').value;
-                }
             </script>
-        </body>
-        </html>
-        `);
+        `;
+        res.send(renderLayout('New Application', content, 'customer', settings));
     });
 });
 
-// Handle Wizard Form Submission
+// Handle Application Submission
 const uploadFields = upload.fields([
     { name: 'marriage_cert', maxCount: 1 },
     { name: 'valid_id', maxCount: 1 },
     { name: 'photo_holding_id', maxCount: 1 },
     { name: 'id_picture', maxCount: 1 },
+    { name: 'supporting_doc', maxCount: 1 },
     { name: 'gcash_proof', maxCount: 1 }
 ]);
 
-app.post('/customer/apply', requireCustomer, uploadFields, (req, res) => {
-    const userId = req.session.userId;
+app.post('/customer/apply', uploadFields, (req, res) => {
+    if (!req.session.user) return res.redirect('/customer/login');
     const body = req.body;
     const files = req.files || {};
+    
+    // Generate Unique Tracking Number
+    const prefixMap = { 'BIR / TIN': 'TIN', 'SSS': 'SSS', 'Pag-IBIG': 'PAGIBIG' };
+    const prefix = prefixMap[body.service_type] || 'GOV';
+    const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const trackingNumber = `${prefix}-${dateStr}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    getSettings(settings => {
-        const service = body.service_type;
-        const fee = service === 'bir' ? settings.bir_fee : (service === 'sss' ? settings.sss_fee : settings.pagibig_fee);
-        
-        // Generate Unique Tracking Number
-        const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
-        const randNum = Math.floor(1000 + Math.random() * 9000);
-        const trackingNumber = `${service.toUpperCase()}-${dateStr}-${randNum}`;
+    const feeMap = { 'BIR / TIN': 500, 'SSS': 400, 'Pag-IBIG': 400 };
+    getSettings((settings) => {
+        const amount = body.service_type === 'BIR / TIN' ? settings.tin_fee : body.service_type === 'SSS' ? settings.sss_fee : settings.pagibig_fee;
 
-        db.serialize(() => {
-            db.run(`INSERT INTO applications (user_id, service_type, tracking_number, payment_method, payment_ref, amount_paid, date_paid, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [userId, service, trackingNumber, body.payment_method, body.payment_ref || '', body.amount_paid || fee, body.date_paid || '', body.payment_method === 'gcash' ? 'Pending Verification' : 'Unpaid'], function(err) {
-                    if(err) {
-                        return res.redirect('/customer?error=Failed to submit application');
-                    }
-                    const appId = this.lastID;
+        db.run(`INSERT INTO applications (user_id, service_type, tracking_number, status, payment_status, payment_method, amount_paid, reference_number, gcash_proof) 
+                VALUES (?, ?, ?, 'Submitted', ?, ?, ?, ?, ?)`,
+            [req.session.user.id, body.service_type, tracking_number, body.payment_method === 'GCash' ? 'Pending Verification' : 'Unpaid', body.payment_method, amount, body.reference_number || '', files.gcash_proof ? files.gcash_proof[0].filename : ''],
+            function(err) {
+                if (err) {
+                    console.error(err);
+                    return res.redirect('/customer/dashboard');
+                }
+                const appId = this.lastID;
 
-                    // Applicant Info
-                    db.run(`INSERT INTO applicant_information (application_id, first_name, middle_name, last_name, suffix, dob, pob, sex, civil_status, nationality, mobile, email, house_block_lot, street, barangay, municipality_city, province, zip_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                        [appId, body.first_name, body.middle_name, body.last_name, body.suffix, body.dob, body.pob, body.sex, body.civil_status, body.nationality, body.mobile, body.email, body.house_block_lot, body.street, body.barangay, body.municipality_city, body.province, body.zip_code]);
+                // Insert Personal Info
+                db.run(`INSERT INTO applicant_information (application_id, firstname, middlename, lastname, suffix, dob, pob, sex, civil_status, nationality, mobile, email, house, street, barangay, municipality, province, zipcode)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [appId, body.firstname, body.middlename, body.lastname, body.suffix, body.dob, body.pob, body.sex, body.civil_status, body.nationality, body.mobile, body.email, body.house, body.street, body.barangay, body.municipality, body.province, body.zipcode]);
 
-                    // Parents
-                    db.run(`INSERT INTO parents (application_id, father_first_name, father_middle_name, father_last_name, father_dob, mother_first_name, mother_middle_name, mother_maiden_name, mother_last_name, mother_dob) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                        [appId, body.father_first_name, body.father_middle_name, body.father_last_name, body.father_dob, body.mother_first_name, body.mother_middle_name, body.mother_maiden_name, body.mother_last_name, body.mother_dob]);
+                // Insert Parents
+                db.run(`INSERT INTO parents (application_id, father_firstname, father_middlename, father_lastname, father_dob, mother_firstname, mother_middlename, mother_maidenname, mother_lastname, mother_dob)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [appId, body.father_firstname, body.father_middlename, body.father_lastname, body.father_dob, body.mother_firstname, body.mother_middlename, body.mother_maidenname, body.mother_lastname, body.mother_dob]);
 
-                    // Spouse
-                    if(body.civil_status === 'Married') {
-                        const mcPath = files.marriage_cert ? files.marriage_cert[0].path : '';
-                        db.run(`INSERT INTO spouses (application_id, spouse_full_name, spouse_dob, marriage_cert) VALUES (?, ?, ?, ?)`,
-                            [appId, body.spouse_full_name, body.spouse_dob, mcPath]);
-                    }
+                // Insert Spouse if married
+                if (body.civil_status === 'Married') {
+                    db.run(`INSERT INTO spouses (application_id, fullname, dob, marriage_cert) VALUES (?, ?, ?, ?)`,
+                        [appId, body.spouse_fullname, body.spouse_dob, files.marriage_cert ? files.marriage_cert[0].filename : '']);
+                }
 
-                    // Beneficiaries
-                    if(body.ben_full_name && Array.isArray(body.ben_full_name)) {
-                        for(let i=0; i<body.ben_full_name.length; i++) {
-                            db.run(`INSERT INTO beneficiaries (application_id, full_name, relationship, dob, sex, address) VALUES (?, ?, ?, ?, ?, ?)`,
-                                [appId, body.ben_full_name[i], body.ben_relationship[i], body.ben_dob[i], body.ben_sex[i], body.ben_address[i]]);
+                // Insert Beneficiaries
+                if (body.ben_name && Array.isArray(body.ben_name)) {
+                    for (let i = 0; i < body.ben_name.length; i++) {
+                        if (body.ben_name[i]) {
+                            db.run(`INSERT INTO beneficiaries (application_id, fullname, relationship, dob, sex, address) VALUES (?, ?, ?, ?, ?, ?)`,
+                                [appId, body.ben_name[i], body.ben_relationship[i], body.ben_dob[i], body.ben_sex[i], body.ben_address[i]]);
                         }
                     }
+                }
 
-                    // Employment
-                    db.run(`INSERT INTO employment (application_id, employment_status, employer_name, employer_address, employer_contact, occupation, position, monthly_income, date_started, business_name, business_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                        [appId, body.employment_status, body.employer_name, body.employer_address, body.employer_contact, body.occupation, body.position, body.monthly_income, body.date_started, body.business_name, body.business_address]);
+                // Insert Employment
+                db.run(`INSERT INTO employment (application_id, status, employer_name, employer_address, employer_contact, occupation, position, monthly_income, date_started, business_name, business_address)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [appId, body.emp_status, body.employer_name, body.employer_address, body.employer_contact, body.occupation, body.occupation, body.monthly_income, body.date_started, body.business_name, body.business_address]);
 
-                    // Documents
-                    if(files.valid_id) db.run(`INSERT INTO documents (application_id, doc_type, file_path, file_name) VALUES (?, ?, ?, ?)`, [appId, 'Valid ID', files.valid_id[0].path, files.valid_id[0].filename]);
-                    if(files.photo_holding_id) db.run(`INSERT INTO documents (application_id, doc_type, file_path, file_name) VALUES (?, ?, ?, ?)`, [appId, 'Photo Holding ID', files.photo_holding_id[0].path, files.photo_holding_id[0].filename]);
-                    if(files.id_picture) db.run(`INSERT INTO documents (application_id, doc_type, file_path, file_name) VALUES (?, ?, ?, ?)`, [appId, 'ID Picture', files.id_picture[0].path, files.id_picture[0].filename]);
-                    if(files.marriage_cert) db.run(`INSERT INTO documents (application_id, doc_type, file_path, file_name) VALUES (?, ?, ?, ?)`, [appId, 'Marriage Certificate', files.marriage_cert[0].path, files.marriage_cert[0].filename]);
-                    if(files.gcash_proof) db.run(`INSERT INTO documents (application_id, doc_type, file_path, file_name) VALUES (?, ?, ?, ?)`, [appId, 'GCash Proof', files.gcash_proof[0].path, files.gcash_proof[0].filename]);
-
-                    // Status history & Notification
-                    db.run(`INSERT INTO status_history (application_id, action, user_name, remarks) VALUES (?, ?, ?, ?)`, [appId, 'Application Submitted', req.session.userName, 'Application successfully created and submitted.']);
-                    db.run(`INSERT INTO notifications (user_id, message) VALUES (?, ?)`, [userId, `Your application ${trackingNumber} has been successfully submitted.`]);
-
-                    res.redirect('/customer');
+                // Insert Documents
+                const docMap = [
+                    { key: 'valid_id', type: 'Valid ID' },
+                    { key: 'photo_holding_id', type: 'Photo Holding ID' },
+                    { key: 'id_picture', type: 'ID Picture' },
+                    { key: 'supporting_doc', type: 'Supporting Document' }
+                ];
+                docMap.forEach(d => {
+                    if (files[d.key]) {
+                        db.run(`INSERT INTO documents (application_id, doc_type, file_path, original_name) VALUES (?, ?, ?, ?)`,
+                            [appId, d.type, files[d.key][0].filename, files[d.key][0].originalname]);
+                    }
                 });
-        });
+
+                logHistory(appId, 'Application Submitted', req.session.user.fullname, 'Application successfully submitted by customer.');
+                createNotification(req.session.user.id, `Your application ${trackingNumber} has been successfully submitted.`);
+
+                res.redirect('/customer/dashboard');
+            });
     });
 });
 
-// Customer View Application Details & Completed Documents
-app.get('/customer/application/:id', requireCustomer, (req, res) => {
+// View Single Application (Customer)
+app.get('/customer/application/:id', (req, res) => {
+    if (!req.session.user) return res.redirect('/customer/login');
     const appId = req.params.id;
-    db.get(`SELECT * FROM applications WHERE id = ? AND user_id = ?`, [appId, req.session.userId], (err, app) => {
-        if(!app) return res.redirect('/customer');
-
-        db.all(`SELECT * FROM documents WHERE application_id = ?`, [appId], (err, docs) => {
-            db.all(`SELECT * FROM admin_uploaded_files WHERE application_id = ?`, [appId], (err, adminFiles) => {
-                db.all(`SELECT * FROM status_history WHERE application_id = ? ORDER BY created_at ASC`, [appId], (err, history) => {
-                    getSettings(settings => {
-                        res.send(`
-                        <!DOCTYPE html>
-                        <html lang="en">
-                        <head>
-                            <meta charset="UTF-8">
-                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                            <title>Application Details - ${app.tracking_number}</title>
-                            <script src="https://cdn.tailwindcss.com"></script>
-                            <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-                        </head>
-                        <body class="bg-gray-100 font-sans py-10">
-                            <div class="max-w-4xl mx-auto bg-white p-8 rounded-xl shadow-md space-y-6">
-                                <div class="flex justify-between items-center border-b pb-4">
-                                    <div>
-                                        <h1 class="text-xl font-bold text-blue-900">Application: <span class="font-mono text-blue-600">${app.tracking_number}</span></h1>
-                                        <p class="text-sm text-gray-500">Service: <span class="uppercase font-semibold">${app.service_type}</span></p>
-                                    </div>
-                                    <a href="/customer" class="bg-gray-200 px-4 py-2 rounded text-sm font-medium hover:bg-gray-300"><i class="fas fa-arrow-left mr-1"></i> Back to Dashboard</a>
+    getSettings((settings) => {
+        db.get("SELECT * FROM applications WHERE id = ? AND user_id = ?", [appId, req.session.user.id], (err, appData) => {
+            if (!appData) return res.redirect('/customer/dashboard');
+            db.get("SELECT * FROM applicant_information WHERE application_id = ?", [appId], (err2, info) => {
+                db.all("SELECT * FROM documents WHERE application_id = ?", [appId], (err3, docs) => {
+                    db.all("SELECT * FROM completed_documents WHERE application_id = ?", [appId], (err4, completedDocs) => {
+                        db.all("SELECT * FROM status_history WHERE application_id = ? ORDER BY created_at DESC", [appId], (err5, history) => {
+                            
+                            const content = `
+                                <div class="card">
+                                    <h2>Application Details: ${appData.tracking_number}</h2>
+                                    <p><strong>Service:</strong> ${appData.service_type}</p>
+                                    <p><strong>Status:</strong> <span class="badge badge-${appData.status.toLowerCase().replace(/\s+/g, '-')}">${appData.status}</span></p>
+                                    <p><strong>Payment Status:</strong> <span class="badge badge-${appData.payment_status.toLowerCase().replace(/\s+/g, '-')}">${appData.payment_status}</span></p>
+                                    <p><strong>Submitted Date:</strong> ${appData.created_at}</p>
                                 </div>
 
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div class="p-4 bg-gray-50 rounded-xl border">
-                                        <h3 class="font-bold text-gray-800 mb-2">Status & Payment</h3>
-                                        <p class="text-sm">Application Status: <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded font-semibold text-xs">${app.status}</span></p>
-                                        <p class="text-sm mt-2">Payment Status: <span class="px-2 py-1 rounded font-semibold text-xs ${app.payment_status === 'Paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">${app.payment_status}</span></p>
-                                        <p class="text-sm mt-2">Payment Method: <span class="uppercase font-semibold">${app.payment_method || 'N/A'}</span></p>
-                                    </div>
+                                <div class="card">
+                                    <h3>Applicant Information</h3>
+                                    <p><strong>Name:</strong> ${info.firstname} ${info.middlename || ''} ${info.lastname} ${info.suffix || ''}</p>
+                                    <p><strong>Date of Birth:</strong> ${info.dob} | <strong>Sex:</strong> ${info.sex}</p>
+                                    <p><strong>Address:</strong> ${info.house || ''} ${info.street || ''}, ${info.barangay}, ${info.municipality}, ${info.province} (${info.zipcode})</p>
+                                </div>
 
-                                    <div class="p-4 bg-gray-50 rounded-xl border">
-                                        <h3 class="font-bold text-gray-800 mb-2">Completed Documents from Admin</h3>
-                                        <div class="space-y-2">
-                                            ${adminFiles.length === 0 ? '<p class="text-sm text-gray-500">No completed documents uploaded by admin yet.</p>' : ''}
-                                            ${adminFiles.map(af => `
-                                                <div class="flex justify-between items-center bg-white p-2 rounded border text-sm">
-                                                    <div>
-                                                        <p class="font-semibold text-gray-800">${af.file_name}</p>
-                                                        <p class="text-xs text-gray-400">${af.description || ''}</p>
-                                                    </div>
-                                                    <a href="//${af.file_path}" target="_blank" class="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700">Download</a>
-                                                </div>
+                                <div class="card">
+                                    <h3>Completed Documents from Admin</h3>
+                                    ${completedDocs && completedDocs.length > 0 ? `
+                                        <table>
+                                            <tr><th>File Name</th><th>Description</th><th>Date</th><th>Action</th></tr>
+                                            ${completedDocs.map(cd => `
+                                                <tr>
+                                                    <td>${cd.file_name}</td>
+                                                    <td>${cd.description || 'Completed Document'}</td>
+                                                    <td>${cd.uploaded_at}</td>
+                                                    <td><a href="/uploads/${cd.file_path}" class="btn btn-sm" download>Download</a></td>
+                                                </tr>
                                             `).join('')}
-                                        </div>
-                                    </div>
+                                        </table>
+                                    ` : '<p style="color: #64748b;">No completed documents uploaded by admin yet.</p>'}
                                 </div>
 
-                                <!-- Uploaded Documents Preview -->
-                                <div class="p-4 bg-gray-50 rounded-xl border">
-                                    <h3 class="font-bold text-gray-800 mb-2">Your Uploaded Documents</h3>
-                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                        ${docs.map(d => `
-                                            <div class="bg-white p-2 rounded border text-center">
-                                                <p class="text-xs font-semibold mb-2">${d.doc_type}</p>
-                                                <a href="/${d.file_path}" target="_blank" class="text-blue-600 text-xs underline">Preview / View</a>
-                                            </div>
-                                        `).join('')}
-                                    </div>
+                                <div class="card">
+                                    <h3>Application History</h3>
+                                    <ul>
+                                        ${history.map(h => `<li><strong>${h.created_at}</strong> - ${h.action}: ${h.remarks || ''}</li>`).join('')}
+                                    </ul>
                                 </div>
 
-                                <!-- History Timeline -->
-                                <div class="p-4 bg-gray-50 rounded-xl border">
-                                    <h3 class="font-bold text-gray-800 mb-3">Application History</h3>
-                                    <div class="space-y-3 border-l-2 border-blue-200 pl-4 ml-2">
-                                        ${history.map(h => `
-                                            <div class="relative">
-                                                <div class="absolute -left-[21px] top-1 w-3 h-3 bg-blue-600 rounded-full border-2 border-white"></div>
-                                                <p class="text-xs text-gray-400">${h.created_at}</p>
-                                                <p class="font-medium text-gray-800">${h.action}</p>
-                                                ${h.remarks ? `<p class="text-sm text-gray-600 bg-white p-2 rounded mt-1 border">${h.remarks}</p>` : ''}
-                                            </div>
-                                        `).join('')}
-                                    </div>
-                                </div>
-                            </div>
-                        </body>
-                        </html>
-                        `);
+                                <div class="mt-2"><a href="/customer/dashboard" class="btn btn-secondary">Back to Dashboard</a></div>
+                            `;
+                            res.send(renderLayout('Application Details', content, 'customer', settings));
+                        });
                     });
                 });
             });
@@ -1231,467 +994,276 @@ app.get('/customer/application/:id', requireCustomer, (req, res) => {
     });
 });
 
-// Customer Profile & Password
-app.get('/customer/profile', requireCustomer, (req, res) => {
-    db.get(`SELECT * FROM users WHERE id = ?`, [req.session.userId], (err, user) => {
-        getSettings(settings => {
-            res.send(`
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Profile - ${settings.business_name}</title>
-                <script src="https://cdn.tailwindcss.com"></script>
-            </head>
-            <body class="bg-gray-100 font-sans py-10">
-                <div class="max-w-md mx-auto bg-white p-8 rounded-xl shadow-md space-y-6">
-                    <div class="flex justify-between items-center border-b pb-4">
-                        <h1 class="text-xl font-bold text-blue-900">Profile & Security</h1>
-                        <a href="/customer" class="text-sm text-blue-600 hover:underline">Back</a>
-                    </div>
-                    ${req.query.success ? '<div class="p-3 bg-green-100 text-green-700 text-sm rounded">Password updated successfully!</div>' : ''}
-                    ${req.query.error ? '<div class="p-3 bg-red-100 text-red-700 text-sm rounded">Current password incorrect.</div>' : ''}
-                    
-                    <div class="space-y-2 text-sm">
-                        <p><strong>Full Name:</strong> ${user.full_name}</p>
-                        <p><strong>Email:</strong> ${user.email}</p>
-                        <p><strong>Mobile:</strong> ${user.mobile_number}</p>
-                        <p><strong>Username:</strong> ${user.username}</p>
-                    </div>
-
-                    <form method="POST" action="/customer/profile" class="space-y-4 border-t pt-4">
-                        <h3 class="font-bold text-gray-800">Change Password</h3>
-                        <div>
-                            <label class="block text-sm font-medium">Current Password</label>
-                            <input type="password" name="current_password" required class="w-full border p-2 rounded mt-1">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium">New Password</label>
-                            <input type="password" name="new_password" required class="w-full border p-2 rounded mt-1">
-                        </div>
-                        <button type="submit" class="w-full bg-blue-600 text-white p-2 rounded font-medium hover:bg-blue-700">Update Password</button>
-                    </form>
+app.get('/customer/notifications', (req, res) => {
+    if (!req.session.user) return res.redirect('/customer/login');
+    getSettings((settings) => {
+        db.all("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC", [req.session.user.id], (err, notifs) => {
+            const content = `
+                <div class="card">
+                    <h2>Notifications</h2>
+                    ${notifs && notifs.length > 0 ? `
+                        <ul>
+                            ${notifs.map(n => `<li style="padding: 0.75rem 0; border-bottom: 1px solid #e2e8f0;">${n.message} <br><small style="color: #64748b;">${n.created_at}</small></li>`).join('')}
+                        </ul>
+                    ` : '<p style="color: #64748b;">No notifications found.</p>'}
                 </div>
-            </body>
-            </html>
-            `);
+            `;
+            res.send(renderLayout('Notifications', content, 'customer', settings));
         });
     });
 });
 
-app.post('/customer/profile', requireCustomer, async (req, res) => {
-    const { current_password, new_password } = req.body;
-    db.get(`SELECT * FROM users WHERE id = ?`, [req.session.userId], async (err, user) => {
-        if(user && await bcrypt.compare(current_password, user.password)) {
-            const hashed = await bcrypt.hash(new_password, 10);
-            db.run(`UPDATE users SET password = ? WHERE id = ?`, [hashed, req.session.userId], () => {
-                res.redirect('/customer/profile?success=1');
-            });
-        } else {
-            res.redirect('/customer/profile?error=1');
-        }
+app.get('/customer/profile', (req, res) => {
+    if (!req.session.user) return res.redirect('/customer/login');
+    getSettings((settings) => {
+        const content = `
+            <div class="card" style="max-width: 500px; margin: 0 auto;">
+                <h2>My Profile</h2>
+                <p><strong>Full Name:</strong> ${req.session.user.fullname}</p>
+                <p><strong>Email:</strong> ${req.session.user.email}</p>
+                <p><strong>Mobile Number:</strong> ${req.session.user.mobile}</p>
+                <p><strong>Username:</strong> ${req.session.user.username}</p>
+            </div>
+        `;
+        res.send(renderLayout('My Profile', content, 'customer', settings));
     });
 });
 
-// ---------------------------------------------------------
-// ADMIN AUTH & PORTAL ROUTES
-// ---------------------------------------------------------
+
+// ==================== ADMIN PORTAL ==================== //
+
 app.get('/admin/login', (req, res) => {
-    getSettings(settings => {
-        res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Admin Login - ${settings.business_name}</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-        </head>
-        <body class="bg-gray-900 flex items-center justify-center min-h-screen">
-            <div class="max-w-md w-full bg-white p-8 rounded-xl shadow-lg">
-                <div class="text-center mb-6">
-                    <h1 class="text-2xl font-bold text-gray-900">Admin Portal</h1>
-                    <p class="text-sm text-gray-600 mt-1">${settings.business_name}</p>
-                </div>
-                ${req.query.error ? '<div class="mb-4 p-3 bg-red-100 text-red-700 text-sm rounded">Invalid admin credentials.</div>' : ''}
-                <form method="POST" action="/admin/login" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Admin Username</label>
-                        <input type="text" name="username" required class="w-full border p-2 rounded mt-1">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Password</label>
-                        <input type="password" name="password" required class="w-full border p-2 rounded mt-1">
-                    </div>
-                    <button type="submit" class="w-full bg-gray-900 text-white p-2 rounded font-medium hover:bg-gray-800">Admin Login</button>
+    getSettings((settings) => {
+        const error = req.query.error || '';
+        const content = `
+            <div class="card" style="max-width: 400px; margin: 0 auto;">
+                <h2>Admin Login</h2>
+                ${error ? `<div class="alert alert-error">${error}</div>` : ''}
+                <form action="/admin/login" method="POST">
+                    <div class="form-group"><label>Admin Username</label><input type="text" name="username" required></div>
+                    <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
+                    <button type="submit" class="btn" style="width: 100%;">Admin Login</button>
                 </form>
             </div>
-        </body>
-        </html>
-        `);
+        `;
+        res.send(renderLayout('Admin Login', content, 'guest', settings));
     });
 });
 
 app.post('/admin/login', (req, res) => {
     const { username, password } = req.body;
-    db.get(`SELECT * FROM admin_users WHERE username = ?`, [username], async (err, admin) => {
-        if(admin && await bcrypt.compare(password, admin.password)) {
-            req.session.adminId = admin.id;
-            req.session.adminName = admin.full_name;
-            res.redirect('/admin');
+    db.get("SELECT * FROM admin_users WHERE username = ?", [username], (err, admin) => {
+        if (admin && bcrypt.compareSync(password, admin.password)) {
+            req.session.admin = admin;
+            res.redirect('/admin/dashboard');
         } else {
-            res.redirect('/admin/login?error=1');
+            res.redirect('/admin/login?error=' + encodeURIComponent('Invalid admin credentials.'));
         }
     });
 });
 
 app.get('/admin/logout', (req, res) => {
-    req.session.destroy(() => res.redirect('/admin/login'));
+    delete req.session.admin;
+    res.redirect('/admin/login');
 });
 
-function requireAdmin(req, res, next) {
-    if(!req.session.adminId) return res.redirect('/admin/login');
-    next();
-}
+// Admin Dashboard
+app.get('/admin/dashboard', (req, res) => {
+    if (!req.session.admin) return res.redirect('/admin/login');
+    getSettings((settings) => {
+        db.all(`SELECT a.*, ai.firstname, ai.lastname, u.email as user_email FROM applications a 
+                LEFT JOIN applicant_information ai ON a.id = ai.application_id 
+                LEFT JOIN users u ON a.user_id = u.id 
+                ORDER BY a.created_at DESC`, (err, apps) => {
+            
+            db.get(`SELECT 
+                COUNT(*) as total_apps,
+                SUM(CASE WHEN service_type='BIR / TIN' THEN 1 ELSE 0 END) as tin_apps,
+                SUM(CASE WHEN service_type='SSS' THEN 1 ELSE 0 END) as sss_apps,
+                SUM(CASE WHEN service_type='Pag-IBIG' THEN 1 ELSE 0 END) as pagibig_apps,
+                SUM(CASE WHEN payment_status='Pending Verification' THEN 1 ELSE 0 END) as pending_payments,
+                SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END) as completed_apps
+                FROM applications`, (err2, stats) => {
 
-// Admin Dashboard & Applications Management
-app.get('/admin', requireAdmin, (req, res) => {
-    const search = req.query.search || '';
-    const statusFilter = req.query.status || '';
-    const serviceFilter = req.query.service || '';
-
-    let query = `SELECT a.*, u.full_name, u.email, u.mobile_number FROM applications a JOIN users u ON a.user_id = u.id WHERE 1=1`;
-    let params = [];
-
-    if(search) {
-        query += ` AND (a.tracking_number LIKE ? OR u.full_name LIKE ? OR u.mobile_number LIKE ? OR u.email LIKE ?)`;
-        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
-    }
-    if(statusFilter) {
-        query += ` AND a.status = ?`;
-        params.push(statusFilter);
-    }
-    if(serviceFilter) {
-        query += ` AND a.service_type = ?`;
-        params.push(serviceFilter);
-    }
-    query += ` ORDER BY a.created_at DESC`;
-
-    db.serialize(() => {
-        db.all(query, params, (err, apps) => {
-            db.all(`SELECT service_type, status, payment_status FROM applications`, (err, allApps) => {
-                db.all(`SELECT COUNT(*) as cnt FROM users`, (err, userCount) => {
-                    getSettings(settings => {
-                        const totalCustomers = userCount[0].cnt;
-                        const totalApplications = allApps.length;
-                        const birCount = allApps.filter(a => a.service_type === 'bir').length;
-                        const sssCount = allApps.filter(a => a.service_type === 'sss').length;
-                        const pagibigCount = allApps.filter(a => a.service_type === 'pagibig').length;
-                        const pendingCount = allApps.filter(a => a.status === 'Submitted' || a.status === 'Under Review').length;
-                        const verifiedPayments = allApps.filter(a => a.payment_status === 'Paid').length;
-
-                        res.send(`
-                        <!DOCTYPE html>
-                        <html lang="en">
-                        <head>
-                            <meta charset="UTF-8">
-                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                            <title>Admin Dashboard - ${settings.business_name}</title>
-                            <script src="https://cdn.tailwindcss.com"></script>
-                            <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-                        </head>
-                        <body class="bg-gray-100 font-sans">
-                            <div class="min-h-screen flex flex-col md:flex-row">
-                                <!-- Sidebar -->
-                                <aside class="w-full md:w-64 bg-gray-900 text-white p-6 space-y-4">
-                                    <h2 class="text-xl font-bold border-b border-gray-800 pb-3">Admin Portal</h2>
-                                    <nav class="space-y-2 text-sm">
-                                        <a href="/admin" class="block p-2 rounded bg-gray-800 font-medium"><i class="fas.fa-chart-pie mr-2"></i> Dashboard & Applications</a>
-                                        <a href="/admin/settings" class="block p-2 rounded hover:bg-gray-800 text-gray-300"><i class="fas fa-cogs mr-2"></i> System Settings & Fees</a>
-                                        <a href="/admin/logout" class="block p-2 rounded hover:bg-red-800 text-red-400 mt-10"><i class="fas fa-sign-out-alt mr-2"></i> Logout</a>
-                                    </nav>
-                                </aside>
-
-                                <!-- Main Content Area -->
-                                <main class="flex-1 p-8 space-y-6">
-                                    <div class="flex justify-between items-center">
-                                        <h1 class="text-2xl font-bold text-gray-900">Dashboard Overview</h1>
-                                        <span class="text-sm text-gray-600">Logged in as: <strong>${req.session.adminName}</strong></span>
-                                    </div>
-
-                                    <!-- Stat Cards -->
-                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                        <div class="bg-white p-4 rounded-xl shadow-sm border">
-                                            <p class="text-xs text-gray-500 font-semibold">TOTAL CUSTOMERS</p>
-                                            <p class="text-2xl font-bold text-gray-900 mt-1">${totalCustomers}</p>
-                                        </div>
-                                        <div class="bg-white p-4 rounded-xl shadow-sm border">
-                                            <p class="text-xs text-gray-500 font-semibold">TOTAL APPLICATIONS</p>
-                                            <p class="text-2xl font-bold text-blue-600 mt-1">${totalApplications}</p>
-                                        </div>
-                                        <div class="bg-white p-4 rounded-xl shadow-sm border">
-                                            <p class="text-xs text-gray-500 font-semibold">PENDING REVIEW</p>
-                                            <p class="text-2xl font-bold text-yellow-600 mt-1">${pendingCount}</p>
-                                        </div>
-                                        <div class="bg-white p-4 rounded-xl shadow-sm border">
-                                            <p class="text-xs text-gray-500 font-semibold">VERIFIED PAYMENTS</p>
-                                            <p class="text-2xl font-bold text-green-600 mt-1">${verifiedPayments}</p>
-                                        </div>
-                                    </div>
-
-                                    <div class="grid grid-cols-3 gap-4 text-xs font-semibold">
-                                        <div class="bg-blue-50 p-3 rounded border border-blue-200 text-blue-900">BIR/TIN Applications: ${birCount}</div>
-                                        <div class="bg-green-50 p-3 rounded border border-green-200 text-green-900">SSS Applications: ${sssCount}</div>
-                                        <div class="bg-purple-50 p-3 rounded border border-purple-200 text-purple-900">Pag-IBIG Applications: ${pagibigCount}</div>
-                                    </div>
-
-                                    <!-- Applications Table & Filters -->
-                                    <div class="bg-white p-6 rounded-xl shadow-sm border space-y-4">
-                                        <h3 class="font-bold text-lg text-gray-800">Applications Management</h3>
-                                        
-                                        <form method="GET" action="/admin" class="grid grid-cols-1 md:grid-cols-4 gap-3">
-                                            <input type="text" name="search" value="${search}" placeholder="Search name, tracking no, email..." class="border p-2 rounded text-sm w-full">
-                                            <select name="status" class="border p-2 rounded text-sm w-full">
-                                                <option value="">All Statuses</option>
-                                                <option value="Submitted" ${statusFilter==='Submitted'?'selected':''}>Submitted</option>
-                                                <option value="Under Review" ${statusFilter==='Under Review'?'selected':''}>Under Review</option>
-                                                <option value="Processing" ${statusFilter==='Processing'?'selected':''}>Processing</option>
-                                                <option value="Need Correction" ${statusFilter==='Need Correction'?'selected':''}>Need Correction</option>
-                                                <option value="Ready" ${statusFilter==='Ready'?'selected':''}>Ready</option>
-                                                <option value="Completed" ${statusFilter==='Completed'?'selected':''}>Completed</option>
-                                                <option value="Rejected" ${statusFilter==='Rejected'?'selected':''}>Rejected</option>
-                                            </select>
-                                            <select name="service" class="border p-2 rounded text-sm w-full">
-                                                <option value="">All Services</option>
-                                                <option value="bir" ${serviceFilter==='bir'?'selected':''}>BIR / TIN</option>
-                                                <option value="sss" ${serviceFilter==='sss'?'selected':''}>SSS</option>
-                                                <option value="pagibig" ${serviceFilter==='pagibig'?'selected':''}>Pag-IBIG</option>
-                                            </select>
-                                            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700">Filter / Search</button>
-                                        </form>
-
-                                        <div class="overflow-x-auto">
-                                            <table class="w-full text-left border-collapse text-sm">
-                                                <thead>
-                                                    <tr class="bg-gray-50 border-b">
-                                                        <th class="p-3">Tracking No.</th>
-                                                        <th class="p-3">Applicant Name</th>
-                                                        <th class="p-3">Service</th>
-                                                        <th class="p-3">Payment</th>
-                                                        <th class="p-3">Status</th>
-                                                        <th class="p-3">Date</th>
-                                                        <th class="p-3">Action</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    ${apps.length === 0 ? `<tr><td colspan="7" class="p-4 text-center text-gray-500">No applications found.</td></tr>` : ''}
-                                                    ${apps.map(app => `
-                                                        <tr class="border-b hover:bg-gray-50">
-                                                            <td class="p-3 font-mono font-bold text-blue-600">${app.tracking_number}</td>
-                                                            <td class="p-3 font-medium">${app.full_name}</td>
-                                                            <td class="p-3 uppercase font-semibold">${app.service_type}</td>
-                                                            <td class="p-3"><span class="px-2 py-1 rounded text-xs font-semibold ${app.payment_status === 'Paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">${app.payment_status}</span></td>
-                                                            <td class="p-3"><span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-semibold">${app.status}</span></td>
-                                                            <td class="p-3 text-gray-500 text-xs">${app.created_at}</td>
-                                                            <td class="p-3">
-                                                                <a href="/admin/application/${app.id}" class="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 font-medium">Manage</a>
-                                                            </td>
-                                                        </tr>
-                                                    `).join('')}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                </main>
+                const content = `
+                    <div class="card">
+                        <h2>Admin Dashboard</h2>
+                        <p style="color: #64748b;">Overview of all customer assistance applications and statistics.</p>
+                        <div class="grid-3 mt-2">
+                            <div class="card" style="background: #eff6ff; border: 1px solid #bfdbfe;">
+                                <h3>${stats.total_apps || 0}</h3>
+                                <p style="color: #1e40af; font-weight: 600;">Total Applications</p>
                             </div>
-                        </body>
-                        </html>
-                        `);
-                    });
-                });
+                            <div class="card" style="background: #f0fdf4; border: 1px solid #bbf7d0;">
+                                <h3>${stats.completed_apps || 0}</h3>
+                                <p style="color: #166534; font-weight: 600;">Completed Applications</p>
+                            </div>
+                            <div class="card" style="background: #fef3c7; border: 1px solid #fde68a;">
+                                <h3>${stats.pending_payments || 0}</h3>
+                                <p style="color: #92400e; font-weight: 600;">Pending Payments</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Applications Management</h3>
+                        <table>
+                            <tr>
+                                <th>Tracking No.</th>
+                                <th>Applicant</th>
+                                <th>Service</th>
+                                <th>Payment</th>
+                                <th>Status</th>
+                                <th>Date</th>
+                                <th>Action</th>
+                            </tr>
+                            ${apps && apps.length > 0 ? apps.map(a => `
+                                <tr>
+                                    <td><strong>${a.tracking_number}</strong></td>
+                                    <td>${a.firstname || ''} ${a.lastname || ''}</td>
+                                    <td>${a.service_type}</td>
+                                    <td><span class="badge badge-${a.payment_status.toLowerCase().replace(/\s+/g, '-')}">${a.payment_status}</span></td>
+                                    <td><span class="badge badge-${a.status.toLowerCase().replace(/\s+/g, '-')}">${a.status}</span></td>
+                                    <td>${a.created_at}</td>
+                                    <td>
+                                        <a href="/admin/application/${a.id}" class="btn btn-sm">Review</a>
+                                    </td>
+                                </tr>
+                            `).join('') : '<tr><td colspan="7">No applications found.</td></tr>'}
+                        </table>
+                    </div>
+                `;
+                res.send(renderLayout('Admin Dashboard', content, 'admin', settings));
             });
         });
     });
 });
 
-// Admin Complete Application Profile & Management
-app.get('/admin/application/:id', requireAdmin, (req, res) => {
+// Detailed Admin Application View
+app.get('/admin/application/:id', (req, res) => {
+    if (!req.session.admin) return res.redirect('/admin/login');
     const appId = req.params.id;
-
-    db.get(`SELECT a.*, u.full_name as user_fullname, u.email, u.mobile_number FROM applications a JOIN users u ON a.user_id = u.id WHERE a.id = ?`, [appId], (err, app) => {
-        if(!app) return res.redirect('/admin');
-
-        db.get(`SELECT * FROM applicant_information WHERE application_id = ?`, [appId], (err, info) => {
-            db.get(`SELECT * FROM parents WHERE application_id = ?`, [appId], (err, parents) => {
-                db.get(`SELECT * FROM spouses WHERE application_id = ?`, [appId], (err, spouse) => {
-                    db.all(`SELECT * FROM beneficiaries WHERE application_id = ?`, [appId], (err, benList) => {
-                        db.get(`SELECT * FROM employment WHERE application_id = ?`, [appId], (err, emp) => {
-                            db.all(`SELECT * FROM documents WHERE application_id = ?`, [appId], (err, docs) => {
-                                db.all(`SELECT * FROM admin_uploaded_files WHERE application_id = ?`, [appId], (err, adminFiles) => {
-                                    db.all(`SELECT * FROM status_history WHERE application_id = ? ORDER BY created_at ASC`, [appId], (err, history) => {
-                                        getSettings(settings => {
-                                            res.send(`
-                                            <!DOCTYPE html>
-                                            <html lang="en">
-                                            <head>
-                                                <meta charset="UTF-8">
-                                                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                                                <title>Manage Application - ${app.tracking_number}</title>
-                                                <script src="https://cdn.tailwindcss.com"></script>
-                                                <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-                                            </head>
-                                            <body class="bg-gray-100 font-sans py-10">
-                                                <div class="max-w-5xl mx-auto bg-white p-8 rounded-xl shadow-md space-y-6">
-                                                    <!-- Top Bar -->
-                                                    <div class="flex justify-between items-center border-b pb-4">
+    getSettings((settings) => {
+        db.get("SELECT * FROM applications WHERE id = ?", [appId], (err, appData) => {
+            if (!appData) return res.redirect('/admin/dashboard');
+            db.get("SELECT * FROM applicant_information WHERE application_id = ?", [appId], (err2, info) => {
+                db.get("SELECT * FROM parents WHERE application_id = ?", [appId], (err3, parents) => {
+                    db.get("SELECT * FROM spouses WHERE application_id = ?", [appId], (err4, spouse) => {
+                        db.all("SELECT * FROM beneficiaries WHERE application_id = ?", [appId], (err5, bens) => {
+                            db.get("SELECT * FROM employment WHERE application_id = ?", [appId], (err6, emp) => {
+                                db.all("SELECT * FROM documents WHERE application_id = ?", [appId], (err7, docs) => {
+                                    db.all("SELECT * FROM completed_documents WHERE application_id = ?", [appId], (err8, compDocs) => {
+                                        db.all("SELECT * FROM status_history WHERE application_id = ? ORDER BY created_at DESC", [appId], (err9, history) => {
+                                            
+                                            const content = `
+                                                <div class="card">
+                                                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                                                        <h2>Application Review: ${appData.tracking_number}</h2>
                                                         <div>
-                                                            <h1 class="text-2xl font-bold text-gray-900">Application Profile</h1>
-                                                            <p class="text-sm text-gray-500 font-mono">Tracking No: ${app.tracking_number} | Service: <span class="uppercase font-bold">${app.service_type}</span></p>
-                                                        </div>
-                                                        <div class="flex space-x-2">
-                                                            <a href="/admin/application/${app.id}/print" target="_blank" class="bg-gray-800 text-white px-4 py-2 rounded text-sm font-medium hover:bg-gray-700"><i class="fas fa-print mr-1"></i> Print Summary</a>
-                                                            <a href="/admin" class="bg-gray-200 px-4 py-2 rounded text-sm font-medium hover:bg-gray-300">Back</a>
+                                                            <button onclick="window.print()" class="btn btn-secondary btn-sm">Print Summary</button>
                                                         </div>
                                                     </div>
-
-                                                    <!-- Status & Payment Update Forms -->
-                                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-xl border">
-                                                        <form method="POST" action="/admin/application/${app.id}/status" class="space-y-3">
-                                                            <h3 class="font-bold text-gray-800">Update Application Status</h3>
-                                                            <div class="flex gap-2">
-                                                                <select name="status" class="border p-2 rounded text-sm flex-1">
-                                                                    <option value="Submitted" ${app.status==='Submitted'?'selected':''}>Submitted</option>
-                                                                    <option value="Payment Pending" ${app.status==='Payment Pending'?'selected':''}>Payment Pending</option>
-                                                                    <option value="Under Review" ${app.status==='Under Review'?'selected':''}>Under Review</option>
-                                                                    <option value="Need Correction" ${app.status==='Need Correction'?'selected':''}>Need Correction</option>
-                                                                    <option value="Processing" ${app.status==='Processing'?'selected':''}>Processing</option>
-                                                                    <option value="Ready" ${app.status==='Ready'?'selected':''}>Ready</option>
-                                                                    <option value="Completed" ${app.status==='Completed'?'selected':''}>Completed</option>
-                                                                    <option value="Rejected" ${app.status==='Rejected'?'selected':''}>Rejected</option>
-                                                                    <option value="Cancelled" ${app.status==='Cancelled'?'selected':''}>Cancelled</option>
+                                                    
+                                                    <!-- UPDATE STATUS & PAYMENT FORM -->
+                                                    <form action="/admin/application/${appId}/update" method="POST" class="mt-2" style="background: #f1f5f9; padding: 1rem; border-radius: 6px;">
+                                                        <div class="grid-2">
+                                                            <div class="form-group">
+                                                                <label>Update Application Status</label>
+                                                                <select name="status">
+                                                                    ${['Submitted', 'Payment Pending', 'Under Review', 'Need Correction', 'Processing', 'Ready', 'Completed', 'Rejected', 'Cancelled'].map(s => `<option value="${s}" ${appData.status === s ? 'selected' : ''}>${s}</option>`).join('')}
                                                                 </select>
-                                                                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700">Update</button>
                                                             </div>
-                                                            <div><input type="text" name="remarks" placeholder="Optional remarks for status change / correction..." class="border p-2 rounded text-sm w-full mt-1"></div>
-                                                        </form>
-
-                                                        <form method="POST" action="/admin/application/${app.id}/payment" class="space-y-3">
-                                                            <h3 class="font-bold text-gray-800">Verify Payment</h3>
-                                                            <div class="flex gap-2">
-                                                                <select name="payment_status" class="border p-2 rounded text-sm flex-1">
-                                                                    <option value="Unpaid" ${app.payment_status==='Unpaid'?'selected':''}>Unpaid</option>
-                                                                    <option value="Pending Verification" ${app.payment_status==='Pending Verification'?'selected':''}>Pending Verification</option>
-                                                                    <option value="Paid" ${app.payment_status==='Paid'?'selected':''}>Paid / Verified</option>
-                                                                    <option value="Rejected" ${app.payment_status==='Rejected'?'selected':''}>Rejected</option>
-                                                                    <option value="Refunded" ${app.payment_status==='Refunded'?'selected':''}>Refunded</option>
+                                                            <div class="form-group">
+                                                                <label>Update Payment Status</label>
+                                                                <select name="payment_status">
+                                                                    ${['Unpaid', 'Pending Verification', 'Paid', 'Rejected', 'Refunded'].map(ps => `<option value="${ps}" ${appData.payment_status === ps ? 'selected' : ''}>${ps}</option>`).join('')}
                                                                 </select>
-                                                                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-green-700">Verify</button>
                                                             </div>
-                                                            <p class="text-xs text-gray-500">Method: <span class="uppercase font-bold">${app.payment_method || 'N/A'}</span> | Ref: <strong>${app.payment_ref || 'N/A'}</strong> | Paid: <strong>₱${app.amount_paid || 0}</strong></p>
-                                                        </form>
-                                                    </div>
-
-                                                    <!-- APPLICATION DATA SUMMARY FOR TRANSCRIPTION -->
-                                                    <div class="p-6 bg-blue-50 rounded-xl border border-blue-200 space-y-4">
-                                                        <h3 class="font-bold text-lg text-blue-900 flex justify-between items-center">
-                                                            <span>Application Data Summary (For Government Form Transcription)</span>
-                                                            <a href="/admin/application/${app.id}/print" target="_blank" class="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">Print Form Data</a>
-                                                        </h3>
-                                                        <table class="w-full text-sm bg-white rounded border">
-                                                            <thead>
-                                                                <tr class="bg-blue-100 text-blue-900">
-                                                                    <th class="p-2 border">FIELD</th>
-                                                                    <th class="p-2 border">CUSTOMER ANSWER</th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                <tr><td class="p-2 border font-semibold">Service Type</td><td class="p-2 border uppercase font-bold text-blue-600">${app.service_type}</td></tr>
-                                                                <tr><td class="p-2 border font-semibold">Full Name</td><td class="p-2 border">${info ? `${info.first_name} ${info.middle_name || ''} ${info.last_name} ${info.suffix || ''}` : ''}</td></tr>
-                                                                <tr><td class="p-2 border font-semibold">Date of Birth / Place of Birth</td><td class="p-2 border">${info ? `${info.dob} / ${info.pob}` : ''}</td></tr>
-                                                                <tr><td class="p-2 border font-semibold">Sex & Civil Status</td><td class="p-2 border">${info ? `${info.sex}, ${info.civil_status}` : ''}</td></tr>
-                                                                <tr><td class="p-2 border font-semibold">Contact Info</td><td class="p-2 border">${info ? `${info.mobile} / ${info.email}` : ''}</td></tr>
-                                                                <tr><td class="p-2 border font-semibold">Complete Address</td><td class="p-2 border">${info ? `${info.house_block_lot || ''} ${info.street || ''}, Brgy. ${info.barangay}, ${info.municipality_city}, ${info.province} (${info.zip_code})` : ''}</td></tr>
-                                                                <tr><td class="p-2 border font-semibold">Father's Full Name & DOB</td><td class="p-2 border">${parents ? `${parents.father_first_name || ''} ${parents.father_middle_name || ''} ${parents.father_last_name || ''} (DOB: ${parents.father_dob || 'N/A'})` : 'N/A'}</td></tr>
-                                                                <tr><td class="p-2 border font-semibold">Mother's Full Name & DOB</td><td class="p-2 border">${parents ? `${parents.mother_first_name || ''} ${parents.mother_middle_name || ''} ${parents.mother_last_name || ''} (DOB: ${parents.mother_dob || 'N/A'})` : 'N/A'}</td></tr>
-                                                                <tr><td class="p-2 border font-semibold">Spouse Information</td><td class="p-2 border">${spouse ? `${spouse.spouse_full_name} (DOB: ${spouse.spouse_dob})` : 'N/A'}</td></tr>
-                                                                <tr><td class="p-2 border font-semibold">Employment Status & Income</td><td class="p-2 border">${emp ? `${emp.employment_status} - ${emp.occupation || 'N/A'} (Income: ₱${emp.monthly_income || '0'})` : 'N/A'}</td></tr>
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-
-                                                    <!-- Beneficiaries -->
-                                                    <div class="p-4 bg-gray-50 rounded-xl border">
-                                                        <h3 class="font-bold text-gray-800 mb-2">Beneficiaries (${benList.length})</h3>
-                                                        <div class="space-y-2">
-                                                            ${benList.map(b => `
-                                                                <div class="bg-white p-3 rounded border text-sm flex justify-between">
-                                                                    <div>
-                                                                        <p class="font-semibold text-gray-900">${b.full_name} <span class="text-xs bg-gray-200 px-2 py-0.5 rounded ml-2">${b.relationship}</span></p>
-                                                                        <p class="text-xs text-gray-500">DOB: ${b.dob} | Sex: ${b.sex} | Address: ${b.address}</p>
-                                                                    </div>
-                                                                </div>
-                                                            `).join('')}
                                                         </div>
-                                                    </div>
-
-                                                    <!-- Documents Management -->
-                                                    <div class="p-4 bg-gray-50 rounded-xl border">
-                                                        <h3 class="font-bold text-gray-800 mb-2">Customer Uploaded Documents</h3>
-                                                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                            ${docs.map(d => `
-                                                                <div class="bg-white p-3 rounded border text-center">
-                                                                    <p class="text-xs font-bold text-gray-700 mb-2">${d.doc_type}</p>
-                                                                    <a href="/${d.file_path}" target="_blank" class="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700">Preview / Download</a>
-                                                                </div>
-                                                            `).join('')}
+                                                        <div class="form-group">
+                                                            <label>Remarks / Notes / Correction Message</label>
+                                                            <textarea name="remarks" placeholder="Enter status remarks or instructions..."></textarea>
                                                         </div>
-                                                    </div>
-
-                                                    <!-- Admin Upload Completed Files -->
-                                                    <div class="p-4 bg-gray-50 rounded-xl border space-y-4">
-                                                        <h3 class="font-bold text-gray-800">Upload Completed / Processed Documents for Customer</h3>
-                                                        <form method="POST" action="/admin/application/${app.id}/upload" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-4 gap-3">
-                                                            <input type="text" name="description" placeholder="File Description (e.g. TIN ID / SSS Certificate)" required class="border p-2 rounded text-sm w-full">
-                                                            <input type="file" name="completed_file" required class="border p-2 rounded text-sm bg-white w-full">
-                                                            <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-green-700 md:col-span-2">+ Upload Completed File</button>
-                                                        </form>
-
-                                                        <div class="space-y-2 mt-4">
-                                                            <h4 class="font-semibold text-sm text-gray-700">Already Uploaded Files</h4>
-                                                            ${adminFiles.length === 0 ? '<p class="text-xs text-gray-500">No files uploaded yet.</p>' : ''}
-                                                            ${adminFiles.map(af => `
-                                                                <div class="flex justify-between items-center bg-white p-2 rounded border text-sm">
-                                                                    <div>
-                                                                        <p class="font-semibold text-gray-800">${af.file_name} <span class="text-xs text-gray-400">(${af.description})</span></p>
-                                                                    </div>
-                                                                    <div class="flex space-x-2">
-                                                                        <a href="/${af.file_path}" target="_blank" class="bg-blue-600 text-white px-3 py-1 rounded text-xs">Download</a>
-                                                                        <a href="/admin/file/${af.id}/delete?app_id=${app.id}" class="bg-red-600 text-white px-3 py-1 rounded text-xs">Delete</a>
-                                                                    </div>
-                                                                </div>
-                                                            `).join('')}
-                                                        </div>
-                                                    </div>
-
-                                                    <!-- History Timeline -->
-                                                    <div class="p-4 bg-gray-50 rounded-xl border">
-                                                        <h3 class="font-bold text-gray-800 mb-3">Application History</h3>
-                                                        <div class="space-y-3 border-l-2 border-blue-200 pl-4 ml-2">
-                                                            ${history.map(h => `
-                                                                <div class="relative">
-                                                                    <div class="absolute -left-[21px] top-1 w-3 h-3 bg-blue-600 rounded-full border-2 border-white"></div>
-                                                                    <p class="text-xs text-gray-400">${h.created_at}</p>
-                                                                    <p class="font-medium text-gray-800">${h.action}</p>
-                                                                    ${h.remarks ? `<p class="text-sm text-gray-600 bg-white p-2 rounded mt-1 border">${h.remarks}</p>` : ''}
-                                                                </div>
-                                                            `).join('')}
-                                                        </div>
-                                                    </div>
+                                                        <button type="submit" class="btn btn-sm">Save Changes</button>
+                                                    </form>
                                                 </div>
-                                            </body>
-                                            </html>
-                                            `);
+
+                                                <!-- ADMIN DATA SUMMARY FOR EASY COPYING -->
+                                                <div class="card">
+                                                    <h3>Application Data Summary (For Government Forms)</h3>
+                                                    <table>
+                                                        <tr><th>Field</th><th>Customer Answer</th></tr>
+                                                        <tr><td>Service Type</td><td><strong>${appData.service_type}</strong></td></tr>
+                                                        <tr><td>Full Name</td><td>${info.firstname} ${info.middlename || ''} ${info.lastname} ${info.suffix || ''}</td></tr>
+                                                        <tr><td>Date of Birth</td><td>${info.dob}</td></tr>
+                                                        <tr><td>Place of Birth</td><td>${info.pob}</td></tr>
+                                                        <tr><td>Sex</td><td>${info.sex}</td></tr>
+                                                        <tr><td>Civil Status</td><td>${info.civil_status}</td></tr>
+                                                        <tr><td>Nationality</td><td>${info.nationality}</td></tr>
+                                                        <tr><td>Mobile / Email</td><td>${info.mobile} / ${info.email}</td></tr>
+                                                        <tr><td>Complete Address</td><td>${info.house || ''} ${info.street || ''}, ${info.barangay}, ${info.municipality}, ${info.province} (${info.zipcode})</td></tr>
+                                                        <tr><td>Father's Name</td><td>${parents ? `${parents.father_firstname || ''} ${parents.father_middlename || ''} ${parents.father_lastname || ''} (DOB: ${parents.father_dob || 'N/A'})` : 'N/A'}</td></tr>
+                                                        <tr><td>Mother's Name</td><td>${parents ? `${parents.mother_firstname || ''} ${parents.mother_middlename || ''} ${parents.mother_lastname || ''} (DOB: ${parents.mother_dob || 'N/A'})` : 'N/A'}</td></tr>
+                                                        <tr><td>Spouse Name</td><td>${spouse ? `${spouse.fullname} (DOB: ${spouse.dob})` : 'N/A'}</td></tr>
+                                                        <tr><td>Employment Status</td><td>${emp ? emp.status : 'N/A'}</td></tr>
+                                                        <tr><td>Employer / Business</td><td>${emp ? (emp.employer_name || emp.business_name || 'N/A') : 'N/A'}</td></tr>
+                                                    </table>
+                                                </div>
+
+                                                <!-- BENEFICIARIES -->
+                                                <div class="card">
+                                                    <h3>Beneficiaries</h3>
+                                                    ${bens && bens.length > 0 ? `
+                                                        <table>
+                                                            <tr><th>Name</th><th>Relationship</th><th>DOB</th><th>Sex</th><th>Address</th></tr>
+                                                            ${bens.map(b => `<tr><td>${b.fullname}</td><td>${b.relationship}</td><td>${b.dob}</td><td>${b.sex}</td><td>${b.address}</td></tr>`).join('')}
+                                                        </table>
+                                                    ` : '<p style="color: #64748b;">No beneficiaries listed.</p>'}
+                                                </div>
+
+                                                <!-- DOCUMENTS -->
+                                                <div class="card">
+                                                    <h3>Customer Uploaded Documents</h3>
+                                                    ${appData.gcash_proof ? `<p><strong>GCash Payment Proof:</strong> <a href="/uploads/${appData.gcash_proof}" target="_blank">View Proof</a> (Ref: ${appData.reference_number})</p>` : ''}
+                                                    ${docs && docs.length > 0 ? `
+                                                        <ul>
+                                                            ${docs.map(d => `<li style="margin-bottom: 0.5rem;"><strong>${d.doc_type}:</strong> <a href="/uploads/${d.file_path}" target="_blank">Preview / Download</a></li>`).join('')}
+                                                        </ul>
+                                                    ` : '<p style="color: #64748b;">No documents uploaded.</p>'}
+                                                </div>
+
+                                                <!-- ADMIN UPLOAD COMPLETED FILES -->
+                                                <div class="card">
+                                                    <h3>Upload Completed Documents to Customer Portal</h3>
+                                                    <form action="/admin/application/${appId}/upload-completed" method="POST" enctype="multipart/form-data">
+                                                        <div class="form-group">
+                                                            <label>Select File(s)</label>
+                                                            <input type="file" name="completed_file" required>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Description / Document Name</label>
+                                                            <input type="text" name="description" placeholder="e.g. Generated TIN ID / SSS Registration Form" required>
+                                                        </div>
+                                                        <button type="submit" class="btn btn-success btn-sm">Upload File</button>
+                                                    </form>
+                                                    <h4 class="mt-2">Already Uploaded Files:</h4>
+                                                    ${compDocs && compDocs.length > 0 ? `
+                                                        <ul>
+                                                            ${compDocs.map(cd => `<li>${cd.file_name} (${cd.description}) - <a href="/uploads/${cd.file_path}" download>Download</a></li>`).join('')}
+                                                        </ul>
+                                                    ` : '<p style="color: #64748b;">None uploaded yet.</p>'}
+                                                </div>
+
+                                                <div class="card">
+                                                    <h3>History Timeline</h3>
+                                                    <ul>
+                                                        ${history.map(h => `<li><strong>${h.created_at}</strong> - ${h.action} (${h.user_name}): ${h.remarks || ''}</li>`).join('')}
+                                                    </ul>
+                                                </div>
+
+                                                <div class="mt-2"><a href="/admin/dashboard" class="btn btn-secondary">Back to Admin Dashboard</a></div>
+                                            `;
+                                            res.send(renderLayout('Admin Application Review', content, 'admin', settings));
                                         });
                                     });
                                 });
@@ -1704,261 +1276,115 @@ app.get('/admin/application/:id', requireAdmin, (req, res) => {
     });
 });
 
-// Admin Update Application Status
-app.post('/admin/application/:id/status', requireAdmin, (req, res) => {
+// Update Application Status (Admin)
+app.post('/admin/application/:id/update', (req, res) => {
+    if (!req.session.admin) return res.redirect('/admin/login');
     const appId = req.params.id;
-    const { status, remarks } = req.body;
+    const { status, payment_status, remarks } = req.body;
 
-    db.get(`SELECT user_id FROM applications WHERE id = ?`, [appId], (err, row) => {
-        if(row) {
-            db.run(`UPDATE applications SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [status, appId], () => {
-                db.run(`INSERT INTO status_history (application_id, action, user_name, remarks) VALUES (?, ?, ?, ?)`,
-                    [appId, `Status Updated to: ${status}`, req.session.adminName, remarks || '']);
-                db.run(`INSERT INTO notifications (user_id, message) VALUES (?, ?)`,
-                    [row.user_id, `Your application status has been updated to: ${status}. ${remarks ? 'Remarks: ' + remarks : ''}`]);
-                res.redirect(`/admin/application/${appId}`);
+    db.get("SELECT user_id, tracking_number FROM applications WHERE id = ?", [appId], (err, appRow) => {
+        db.run("UPDATE applications SET status = ?, payment_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [status, payment_status, appId], () => {
+                logHistory(appId, `Status Updated to ${status} / Payment: ${payment_status}`, req.session.admin.username, remarks);
+                if (appRow) {
+                    createNotification(appRow.user_id, `Your application ${appRow.tracking_number} status was updated to: ${status} (Payment: ${payment_status}). ${remarks ? 'Note: ' + remarks : ''}`);
+                }
+                res.redirect('/admin/application/' + appId);
             });
-        } else {
-            res.redirect('/admin');
-        }
     });
 });
 
-// Admin Verify Payment
-app.post('/admin/application/:id/payment', requireAdmin, (req, res) => {
+// Upload Completed Files (Admin)
+const uploadCompleted = upload.single('completed_file');
+app.post('/admin/application/:id/upload-completed', uploadCompleted, (req, res) => {
+    if (!req.session.admin) return res.redirect('/admin/login');
     const appId = req.params.id;
-    const { payment_status } = req.body;
-
-    db.get(`SELECT user_id FROM applications WHERE id = ?`, [appId], (err, row) => {
-        if(row) {
-            db.run(`UPDATE applications SET payment_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [payment_status, appId], () => {
-                db.run(`INSERT INTO status_history (application_id, action, user_name, remarks) VALUES (?, ?, ?, ?)`,
-                    [appId, `Payment Status Updated to: ${payment_status}`, req.session.adminName, '']);
-                db.run(`INSERT INTO notifications (user_id, message) VALUES (?, ?)`,
-                    [row.user_id, `Your payment status has been updated to: ${payment_status}.`]);
-                res.redirect(`/admin/application/${appId}`);
-            });
-        } else {
-            res.redirect('/admin');
-        }
-    });
-});
-
-// Admin Upload Completed File
-const uploadCompleted = multer().single('completed_file');
-app.post('/admin/application/:id/upload', requireAdmin, upload.single('completed_file'), (req, res) => {
-    const appId = req.params.id;
-    const { description } = req.body;
     const file = req.file;
+    const description = req.body.description;
 
-    if(file) {
-        db.get(`SELECT user_id FROM applications WHERE id = ?`, [appId], (err, row) => {
-            db.run(`INSERT INTO admin_uploaded_files (application_id, file_name, file_path, file_type, description) VALUES (?, ?, ?, ?, ?)`,
-                [appId, file.originalname, file.path, file.mimetype, description], () => {
-                    db.run(`INSERT INTO status_history (application_id, action, user_name, remarks) VALUES (?, ?, ?, ?)`,
-                        [appId, 'Admin Uploaded Completed Document', req.session.adminName, description]);
-                    if(row) {
-                        db.run(`INSERT INTO notifications (user_id, message) VALUES (?, ?)`,
-                            [row.user_id, `Admin has uploaded a completed document for your application: ${description}`]);
+    if (file) {
+        db.run("INSERT INTO completed_documents (application_id, file_name, file_path, file_type, description) VALUES (?, ?, ?, ?, ?)",
+            [appId, file.originalname, file.filename, file.mimetype, description], () => {
+                db.get("SELECT user_id, tracking_number FROM applications WHERE id = ?", [appId], (err, appRow) => {
+                    logHistory(appId, 'Completed Document Uploaded', req.session.admin.username, `Uploaded: ${description}`);
+                    if (appRow) {
+                        createNotification(appRow.user_id, `Admin uploaded a new document for your application ${appRow.tracking_number}: ${description}`);
                     }
-                    res.redirect(`/admin/application/${appId}`);
+                    res.redirect('/admin/application/' + appId);
                 });
-        });
+            });
     } else {
-        res.redirect(`/admin/application/${appId}`);
+        res.redirect('/admin/application/' + appId);
     }
 });
 
-// Admin Delete Uploaded File
-app.get('/admin/file/:fileId/delete', requireAdmin, (req, res) => {
-    const fileId = req.params.fileId;
-    const appId = req.query.app_id;
-    db.run(`DELETE FROM admin_uploaded_files WHERE id = ?`, [fileId], () => {
-        res.redirect(`/admin/application/${appId}`);
-    });
-});
-
-// Admin Print Application Summary & Transcription Sheet
-app.get('/admin/application/:id/print', requireAdmin, (req, res) => {
-    const appId = req.params.id;
-    db.get(`SELECT a.*, u.full_name as user_fullname, u.email, u.mobile_number FROM applications a JOIN users u ON a.user_id = u.id WHERE a.id = ?`, [appId], (err, app) => {
-        db.get(`SELECT * FROM applicant_information WHERE application_id = ?`, [appId], (err, info) => {
-            db.get(`SELECT * FROM parents WHERE application_id = ?`, [appId], (err, parents) => {
-                db.get(`SELECT * FROM spouses WHERE application_id = ?`, [appId], (err, spouse) => {
-                    db.all(`SELECT * FROM beneficiaries WHERE application_id = ?`, [appId], (err, benList) => {
-                        db.get(`SELECT * FROM employment WHERE application_id = ?`, [appId], (err, emp) => {
-                            getSettings(settings => {
-                                res.send(`
-                                <!DOCTYPE html>
-                                <html lang="en">
-                                <head>
-                                    <meta charset="UTF-8">
-                                    <title>Print Application - ${app.tracking_number}</title>
-                                    <script src="https://cdn.tailwindcss.com"></script>
-                                    <style>@media print { body { print-color-adjust: exact; } }</style>
-                                </head>
-                                <body class="bg-white p-8 font-sans text-sm">
-                                    <div class="max-w-3xl mx-auto space-y-6">
-                                        <div class="text-center border-b pb-4">
-                                            <h1 class="text-xl font-bold uppercase text-blue-900">${settings.business_name}</h1>
-                                            <h2 class="text-lg font-bold uppercase text-gray-800 mt-1">Official Government Application Transcription Sheet</h2>
-                                            <p class="text-xs text-gray-500">Service: <span class="uppercase font-bold">${app.service_type}</span> | Tracking No: <span class="font-mono">${app.tracking_number}</span></p>
-                                        </div>
-
-                                        <table class="w-full border-collapse border border-gray-400 text-xs">
-                                            <thead>
-                                                <tr class="bg-gray-100">
-                                                    <th class="border border-gray-400 p-2 text-left w-1/3">FORM FIELD</th>
-                                                    <th class="border border-gray-400 p-2 text-left">CUSTOMER ANSWER</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">First Name</td><td class="border border-gray-400 p-2">${info ? info.first_name : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Middle Name</td><td class="border border-gray-400 p-2">${info ? info.middle_name : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Last Name</td><td class="border border-gray-400 p-2">${info ? info.last_name : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Suffix</td><td class="border border-gray-400 p-2">${info ? info.suffix : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Date of Birth</td><td class="border border-gray-400 p-2">${info ? info.dob : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Place of Birth</td><td class="border border-gray-400 p-2">${info ? info.pob : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Sex</td><td class="border border-gray-400 p-2">${info ? info.sex : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Civil Status</td><td class="border border-gray-400 p-2">${info ? info.civil_status : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Nationality</td><td class="border border-gray-400 p-2">${info ? info.nationality : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Mobile Number</td><td class="border border-gray-400 p-2">${info ? info.mobile : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Email Address</td><td class="border border-gray-400 p-2">${info ? info.email : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Complete Address</td><td class="border border-gray-400 p-2">${info ? `${info.house_block_lot || ''} ${info.street || ''}, Brgy. ${info.barangay}, ${info.municipality_city}, ${info.province} - ${info.zip_code}` : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Father's Full Name</td><td class="border border-gray-400 p-2">${parents ? `${parents.father_first_name || ''} ${parents.father_middle_name || ''} ${parents.father_last_name || ''}` : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Father's DOB</td><td class="border border-gray-400 p-2">${parents ? parents.father_dob : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Mother's Full Name</td><td class="border border-gray-400 p-2">${parents ? `${parents.mother_first_name || ''} ${parents.mother_middle_name || ''} ${parents.mother_maiden_name || ''} ${parents.mother_last_name || ''}` : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Mother's DOB</td><td class="border border-gray-400 p-2">${parents ? parents.mother_dob : ''}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Spouse Name & DOB</td><td class="border border-gray-400 p-2">${spouse ? `${spouse.spouse_full_name} (${spouse.spouse_dob})` : 'N/A'}</td></tr>
-                                                <tr><td class="border border-gray-400 p-2 font-bold">Employment Status & Income</td><td class="border border-gray-400 p-2">${emp ? `${emp.employment_status} | Monthly Income: ₱${emp.monthly_income || 0}` : 'N/A'}</td></tr>
-                                            </tbody>
-                                        </table>
-
-                                        <div class="mt-4">
-                                            <h3 class="font-bold text-xs uppercase text-gray-700 mb-2">Beneficiaries</h3>
-                                            <table class="w-full border-collapse border border-gray-400 text-xs">
-                                                <tr class="bg-gray-100"><th class="border border-gray-400 p-1">Full Name</th><th class="border border-gray-400 p-1">Relationship</th><th class="border border-gray-400 p-1">DOB</th><th class="border border-gray-400 p-1">Sex</th></tr>
-                                                ${benList.map(b => `<tr><td class="border border-gray-400 p-1">${b.full_name}</td><td class="border border-gray-400 p-1">${b.relationship}</td><td class="border border-gray-400 p-1">${b.dob}</td><td class="border border-gray-400 p-1">${b.sex}</td></tr>`).join('')}
-                                            </table>
-                                        </div>
-
-                                        <div class="mt-8 pt-4 border-t text-center text-xs text-gray-500">
-                                            <p>${settings.terms}</p>
-                                        </div>
-                                    </div>
-                                    <script>window.print();</script>
-                                </body>
-                                </html>
-                                `);
-                            });
-                        });
-                    });
-                });
-            });
-        });
-    });
-});
-
-// Admin Settings Page (Fees, GCash QR, Business Info)
-const uploadQR = upload.single('gcash_qr_file');
-app.get('/admin/settings', requireAdmin, (req, res) => {
-    getSettings(settings => {
-        res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Admin Settings - ${settings.business_name}</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-        </head>
-        <body class="bg-gray-100 font-sans">
-            <div class="min-h-screen flex flex-col md:flex-row">
-                <aside class="w-full md:w-64 bg-gray-900 text-white p-6 space-y-4">
-                    <h2 class="text-xl font-bold border-b border-gray-800 pb-3">Admin Portal</h2>
-                    <nav class="space-y-2 text-sm">
-                        <a href="/admin" class="block p-2 rounded hover:bg-gray-800 text-gray-300"><i class="fas fa-chart-pie mr-2"></i> Dashboard</a>
-                        <a href="/admin/settings" class="block p-2 rounded bg-gray-800 font-medium"><i class="fas.fa-cogs mr-2"></i> System Settings & Fees</a>
-                        <a href="/admin/logout" class="block p-2 rounded hover:bg-red-800 text-red-400 mt-10"><i class="fas fa-sign-out-alt mr-2"></i> Logout</a>
-                    </nav>
-                </aside>
-
-                <main class="flex-1 p-8 space-y-6">
-                    <h1 class="text-2xl font-bold text-gray-900">System Settings & Configuration</h1>
-                    ${req.query.success ? '<div class="p-3 bg-green-100 text-green-700 text-sm rounded">Settings updated successfully!</div>' : ''}
+// Admin Settings
+app.get('/admin/settings', (req, res) => {
+    if (!req.session.admin) return res.redirect('/admin/login');
+    getSettings((settings) => {
+        const success = req.query.success || '';
+        const content = `
+            <div class="card" style="max-width: 700px; margin: 0 auto;">
+                <h2>Admin Settings & Configuration</h2>
+                ${success ? `<div class="alert alert-success">${success}</div>` : ''}
+                <form action="/admin/settings" method="POST" enctype="multipart/form-data">
+                    <div class="form-group"><label>Business Name</label><input type="text" name="business_name" value="${settings.business_name || ''}" required></div>
+                    <div class="grid-2">
+                        <div class="form-group"><label>Contact Number</label><input type="text" name="contact_number" value="${settings.contact_number || ''}"></div>
+                        <div class="form-group"><label>Email Address</label><input type="email" name="email" value="${settings.email || ''}"></div>
+                    </div>
+                    <div class="form-group"><label>Office Address</label><input type="text" name="address" value="${settings.address || ''}"></div>
                     
-                    <form method="POST" action="/admin/settings" enctype="multipart/form-data" class="bg-white p-6 rounded-xl shadow-sm border space-y-4 max-w-2xl">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div><label class="block text-sm font-medium">Business / Service Name</label><input type="text" name="business_name" value="${settings.business_name || ''}" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Contact Number</label><input type="text" name="contact_number" value="${settings.contact_number || ''}" required class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div><label class="block text-sm font-medium">Support Email</label><input type="email" name="email" value="${settings.email || ''}" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Address</label><input type="text" name="address" value="${settings.address || ''}" required class="w-full border p-2 rounded mt-1"></div>
-                        </div>
+                    <hr style="margin: 1.5rem 0; border: 0; border-top: 1px solid #e2e8f0;">
+                    <h3>Service Fees (PHP)</h3>
+                    <div class="grid-3">
+                        <div class="form-group"><label>BIR / TIN Fee</label><input type="number" name="tin_fee" value="${settings.tin_fee || 500}"></div>
+                        <div class="form-group"><label>SSS Fee</label><input type="number" name="sss_fee" value="${settings.sss_fee || 400}"></div>
+                        <div class="form-group"><label>Pag-IBIG Fee</label><input type="number" name="pagibig_fee" value="${settings.pagibig_fee || 400}"></div>
+                    </div>
 
-                        <hr>
-                        <h3 class="font-bold text-gray-800">Service Fees (₱)</h3>
-                        <div class="grid grid-cols-3 gap-4">
-                            <div><label class="block text-sm font-medium">BIR / TIN Fee</label><input type="number" name="bir_fee" value="${settings.bir_fee || 500}" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">SSS Fee</label><input type="number" name="sss_fee" value="${settings.sss_fee || 400}" required class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">Pag-IBIG Fee</label><input type="number" name="pagibig_fee" value="${settings.pagibig_fee || 400}" required class="w-full border p-2 rounded mt-1"></div>
-                        </div>
+                    <hr style="margin: 1.5rem 0; border: 0; border-top: 1px solid #e2e8f0;">
+                    <h3>GCash & Payment Settings</h3>
+                    <div class="grid-2">
+                        <div class="form-group"><label>GCash Account Name</label><input type="text" name="gcash_account_name" value="${settings.gcash_account_name || ''}"></div>
+                        <div class="form-group"><label>GCash Number</label><input type="text" name="gcash_number" value="${settings.gcash_number || ''}"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>GCash QR Code Image</label>
+                        ${settings.gcash_qr ? `<div class="mb-2"><img src="/uploads/${settings.gcash_qr}" style="max-width: 150px;"></div>` : ''}
+                        <input type="file" name="gcash_qr" accept="image/*">
+                    </div>
+                    <div class="form-group"><label>Cash Payment Instructions</label><textarea name="cash_instructions">${settings.cash_instructions || ''}</textarea></div>
 
-                        <hr>
-                        <h3 class="font-bold text-gray-800">GCash Payment Configuration</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div><label class="block text-sm font-medium">GCash Account Name</label><input type="text" name="gcash_account_name" value="${settings.gcash_account_name || ''}" class="w-full border p-2 rounded mt-1"></div>
-                            <div><label class="block text-sm font-medium">GCash Number</label><input type="text" name="gcash_number" value="${settings.gcash_number || ''}" class="w-full border p-2 rounded mt-1"></div>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium">Upload GCash QR Code</label>
-                            ${settings.gcash_qr ? `<div class="my-2"><img src="${settings.gcash_qr}" class="w-32 h-32 object-cover border rounded"></div>` : ''}
-                            <input type="file" name="gcash_qr_file" accept="image/*" class="w-full border p-2 rounded mt-1 bg-white">
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium">Cash Payment Instructions</label>
-                            <textarea name="cash_instructions" rows="2" class="w-full border p-2 rounded mt-1">${settings.cash_instructions || ''}</textarea>
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium">Terms and Government Disclaimer</label>
-                            <textarea name="terms" rows="3" class="w-full border p-2 rounded mt-1">${settings.terms || ''}</textarea>
-                        </div>
-
-                        <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded font-medium hover:bg-blue-700">Save Settings</button>
-                    </form>
-                </main>
+                    <button type="submit" class="btn" style="width: 100%; margin-top: 1rem;">Save Settings</button>
+                </form>
             </div>
-        </body>
-        </html>
-        `);
+        `;
+        res.send(renderLayout('Admin Settings', content, 'admin', settings));
     });
 });
 
-app.post('/admin/settings', requireAdmin, uploadQR, (req, res) => {
+const uploadQr = upload.single('gcash_qr');
+app.post('/admin/settings', uploadQr, (req, res) => {
+    if (!req.session.admin) return res.redirect('/admin/login');
     const body = req.body;
     const file = req.file;
 
-    db.serialize(() => {
-        for (const [key, value] of Object.entries(body)) {
-            db.run(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`, [key, value, value]);
+    const keys = ['business_name', 'contact_number', 'email', 'address', 'gcash_account_name', 'gcash_number', 'tin_fee', 'sss_fee', 'pagibig_fee', 'cash_instructions'];
+    keys.forEach(k => {
+        if (body[k] !== undefined) {
+            db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", [k, body[k]]);
         }
-        if(file) {
-            db.run(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`, ['gcash_qr', file.path, file.path]);
-        }
-        res.redirect('/admin/settings?success=1');
     });
-});
 
-// Root Redirect
-app.get('/', (req, res) => {
-    res.redirect('/customer/login');
+    if (file) {
+        db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('gcash_qr', ?)", [file.filename]);
+    }
+
+    res.redirect('/admin/settings?success=' + encodeURIComponent('Settings successfully updated!'));
 });
 
 // Start Server
 app.listen(PORT, () => {
-    console.log(`GovAssist PH Application Assistance System running on port ${PORT}`);
+    console.log(`GovAssist PH system is running on port ${PORT}`);
 });
