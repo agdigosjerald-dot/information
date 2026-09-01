@@ -1,7 +1,7 @@
 {
   "name": "government-application-assistance-system",
   "version": "1.0.0",
-  "description": "Complete BIR/TIN, SSS & Pag-IBIG Application Assistance System",
+  "description": "Complete Production-Ready BIR/TIN, SSS & Pag-IBIG Application Assistance System",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
