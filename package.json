@@ -1,0 +1,19 @@
+{
+  "name": "gov-assistance-system",
+  "version": "1.0.0",
+  "description": "BIR, SSS, and Pag-IBIG Application Assistance, Payment, and Tracking System",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "multer": "^1.4.5-lts.1",
+    "sqlite3": "^5.1.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
