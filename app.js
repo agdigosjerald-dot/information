@@ -193,7 +193,7 @@ function initDatabase() {
       is_read INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
-  }
+  });
 }
 
 // Middleware Configuration
@@ -534,7 +534,8 @@ function requireAdmin(req, res, next) {
 }
 
 // Layout helper for Customer Portal
-function customerLayout(title, content, activeTab, unreadCount = 0) {
+function customerLayout(title, content, activeTab, unreadCount = 0, reqSession = null) {
+  const customerName = reqSession && reqSession.customer ? reqSession.customer.full_name : '';
   return `
     <!DOCTYPE html>
     <html lang="en">
@@ -561,7 +562,7 @@ function customerLayout(title, content, activeTab, unreadCount = 0) {
             </nav>
           </div>
           <div class="mt-8 pt-4 border-t border-blue-800">
-            <span class="block text-sm text-blue-200 mb-2">Logged in as: <strong>${session.customer ? session.customer.full_name : ''}</strong></span>
+            <span class="block text-sm text-blue-200 mb-2">Logged in as: <strong>${customerName}</strong></span>
             <a href="/customer/logout" class="block text-center bg-red-600 hover:bg-red-700 text-white py-2 rounded text-sm font-semibold">Logout</a>
           </div>
         </aside>
@@ -638,7 +639,7 @@ app.get('/customer/dashboard', requireCustomer, async (req, res) => {
           <strong>Disclaimer:</strong> This platform assists you in preparing and submitting government applications. It is not an official government portal.
         </div>
       `;
-      res.send(customerLayout('Dashboard', content, 'dashboard', notifs.length));
+      res.send(customerLayout('Dashboard', content, 'dashboard', notifs.length, req.session));
     });
   });
 });
@@ -987,7 +988,7 @@ app.get('/customer/apply', requireCustomer, async (req, res) => {
       }
     </script>
   `;
-  res.send(customerLayout('New Application', content, 'apply'));
+  res.send(customerLayout('New Application', content, 'apply', 0, req.session));
 });
 
 // Handle Application Submission with Multer fields
@@ -1090,7 +1091,7 @@ app.get('/customer/applications', requireCustomer, (req, res) => {
         `}
       </div>
     `;
-    res.send(customerLayout('My Applications', content, 'applications'));
+    res.send(customerLayout('My Applications', content, 'applications', 0, req.session));
   });
 });
 
@@ -1169,7 +1170,7 @@ app.get('/customer/track/:id', requireCustomer, (req, res) => {
               </div>
             </div>
           `;
-          res.send(customerLayout('Application Tracking', content, 'applications'));
+          res.send(customerLayout('Application Tracking', content, 'applications', 0, req.session));
         });
       });
     });
@@ -1198,7 +1199,7 @@ app.get('/customer/documents', requireCustomer, (req, res) => {
         `}
       </div>
     `;
-    res.send(customerLayout('Completed Documents', content, 'documents'));
+    res.send(customerLayout('Completed Documents', content, 'documents', 0, req.session));
   });
 });
 
@@ -1220,7 +1221,7 @@ app.get('/customer/notifications', requireCustomer, (req, res) => {
         `).join('')}
       </div>
     `;
-    res.send(customerLayout('Notifications', content, 'notifications', 0));
+    res.send(customerLayout('Notifications', content, 'notifications', 0, req.session));
   });
 });
 
@@ -1253,7 +1254,7 @@ app.get('/customer/profile', requireCustomer, (req, res) => {
         <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded">Update Profile</button>
       </form>
     `;
-    res.send(customerLayout('Profile', content, 'profile'));
+    res.send(customerLayout('Profile', content, 'profile', 0, req.session));
   });
 });
 
