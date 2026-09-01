@@ -1,13 +1,13 @@
 {
-  "name": "government-application-assistance-system",
+  "name": "gov-assistance-system",
   "version": "1.0.0",
-  "description": "Complete Production-Ready BIR/TIN, SSS & Pag-IBIG Application Assistance System",
+  "description": "Complete BIR/TIN, SSS & Pag-IBIG Application Assistance System",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
     "multer": "^1.4.5-lts.1",
