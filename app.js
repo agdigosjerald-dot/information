@@ -48,20 +48,20 @@ const upload = multer({
   }
 });
 
-// Database Setup (SQLite for long-term persistence - data remains intact)
+// Database Setup (SQLite for persistence - data will not vanish overnight)
 const dbFile = path.join(__dirname, 'database.sqlite');
 const db = new sqlite3.Database(dbFile, (err) => {
   if (err) {
     console.error('Error opening database', err.message);
   } else {
-    console.log('Connected to the persistent SQLite database.');
+    console.log('Connected to the SQLite database.');
     initDatabase();
   }
 });
 
 function initDatabase() {
   db.serialize(() => {
-    // Users (Customers)
+    // Users (Customers) with device preference & account retention tracking (15 days minimum retention)
     db.run(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE,
@@ -69,8 +69,10 @@ function initDatabase() {
       full_name TEXT,
       mobile_number TEXT,
       email_address TEXT,
-      device_preference TEXT DEFAULT 'mobile',
+      device_type TEXT DEFAULT 'Mobile',
+      device_os TEXT DEFAULT 'Android',
       is_verified INTEGER DEFAULT 1,
+      last_active DATETIME DEFAULT CURRENT_TIMESTAMP,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
@@ -91,7 +93,7 @@ function initDatabase() {
       });
     });
 
-    // Settings
+    // Settings (Includes specific QR codes for BIR, SSS, PAG-IBIG)
     db.run(`CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT
@@ -111,7 +113,7 @@ function initDatabase() {
         fee_bir: '500',
         fee_sss: '400',
         fee_pagibig: '400',
-        announcement: 'Welcome to GovAssist PH! Fast, secure, and device-optimized government application assistance.',
+        announcement: 'Welcome to GovAssist PH! Fast & secure government application processing with 30+ built-in pro features.',
         maintenance_mode: '0'
       };
       for (const [key, value] of Object.entries(defaultSettings)) {
@@ -211,7 +213,7 @@ function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
-    // Audit Logs
+    // Audit Logs for Admin
     db.run(`CREATE TABLE IF NOT EXISTS audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       admin_username TEXT,
@@ -226,13 +228,13 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.json({ limit: '50mb' }));
 app.use('/uploads', express.static(uploadDir));
 
-// Persistent Session Configuration (15 Days Session Retention)
+// Persistent Session Configuration (15 days retention policy for user accounts and sessions)
 app.use(session({
   store: new SQLiteStore({ db: 'sessions.sqlite', dir: __dirname }),
   secret: process.env.SESSION_SECRET || 'mark_jerald_agdigos_govassist_secure_key_2026',
   resave: true,
   saveUninitialized: false,
-  cookie: { maxAge: 15 * 24 * 60 * 60 * 1000 } // Retain login for 15 Days
+  cookie: { maxAge: 15 * 24 * 60 * 60 * 1000 } // 15 days persistence
 }));
 
 // Helper to get settings
@@ -268,7 +270,6 @@ app.use(async (req, res, next) => {
     res.locals.customer = req.session.customer || null;
     res.locals.admin = req.session.admin || null;
     res.locals.lang = req.session.lang || 'en';
-    res.locals.device = req.session.device || null;
     next();
   } catch (e) {
     next();
@@ -283,95 +284,6 @@ app.get('/set-lang/:lang', (req, res) => {
   }
   res.redirect(req.get('referer') || '/');
 });
-
-// ==========================================
-// FEATURE #1: DEVICE SELECTION ROUTE
-// ==========================================
-app.get('/customer/select-device', (req, res) => {
-  const settings = res.locals.settings;
-  const redirectUrl = req.query.redirect || '/customer/dashboard';
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Select Device - ${settings.business_name}</title>
-      <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    </head>
-    <body class="bg-slate-900 text-slate-100 flex items-center justify-center min-h-screen p-4">
-      <div class="bg-slate-950 max-w-lg w-full p-8 rounded-3xl shadow-2xl border border-slate-800 text-center">
-        <div class="mb-6">
-          <span class="text-4xl block mb-2">📱💻</span>
-          <h1 class="text-2xl font-black text-white">Anong device ang gamit mo?</h1>
-          <p class="text-xs text-slate-400 mt-2">Pumili para sa mas maganda at angkop na karanasan sa pag-browse.</p>
-        </div>
-
-        <form action="/customer/select-device" method="POST" class="space-y-4">
-          <input type="hidden" name="redirect_url" value="${redirectUrl}">
-          
-          <label class="flex items-center p-4 border border-slate-800 bg-slate-900 rounded-2xl hover:border-blue-500 cursor-pointer transition">
-            <input type="radio" name="device" value="mobile" checked class="w-5 h-5 text-blue-600">
-            <div class="ml-4 text-left">
-              <span class="block font-bold text-white text-base">📱 Mobile Phone (Smartphone)</span>
-              <span class="block text-xs text-slate-400">Optimized layout para sa maliit na screen at mabilis na touch navigation.</span>
-            </div>
-          </label>
-
-          <label class="flex items-center p-4 border border-slate-800 bg-slate-900 rounded-2xl hover:border-blue-500 cursor-pointer transition">
-            <input type="radio" name="device" value="tablet" class="w-5 h-5 text-blue-600">
-            <div class="ml-4 text-left">
-              <span class="block font-bold text-white text-base">📲 Tablet / iPad</span>
-              <span class="block text-xs text-slate-400">Balanseng layout para sa medium screen size.</span>
-            </div>
-          </label>
-
-          <label class="flex items-center p-4 border border-slate-800 bg-slate-900 rounded-2xl hover:border-blue-500 cursor-pointer transition">
-            <input type="radio" name="device" value="desktop" class="w-5 h-5 text-blue-600">
-            <div class="ml-4 text-left">
-              <span class="block font-bold text-white text-base">💻 Laptop / Desktop Computer</span>
-              <span class="block text-xs text-slate-400">Full widescreen display na may kumpletong multi-column view.</span>
-            </div>
-          </label>
-
-          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3.5 rounded-xl shadow-lg transition text-sm">Magpatuloy sa Customer Portal &rarr;</button>
-        </form>
-      </div>
-    </body>
-    </html>
-  `);
-});
-
-app.post('/customer/select-device', (req, res) => {
-  const { device, redirect_url } = req.body;
-  req.session.device = device || 'mobile';
-  
-  if (req.session.customer) {
-    db.run(`UPDATE users SET device_preference = ? WHERE id = ?`, [req.session.device, req.session.customer.id]);
-  }
-
-  res.redirect(redirect_url || '/customer/dashboard');
-});
-
-// ==========================================
-// MIDDLEWARE GUARDS
-// ==========================================
-function requireCustomer(req, res, next) {
-  if (!req.session.customer) {
-    return res.redirect('/customer/login');
-  }
-  if (!req.session.device) {
-    return res.redirect('/customer/select-device?redirect=' + encodeURIComponent(req.originalUrl));
-  }
-  next();
-}
-
-function requireAdmin(req, res, next) {
-  if (!req.session.admin) {
-    return res.redirect('/admin/login');
-  }
-  next();
-}
 
 // ==========================================
 // LANDING & PUBLIC PORTAL
@@ -404,7 +316,7 @@ app.get('/', async (req, res) => {
               <a href="/set-lang/tl" class="px-3 py-1 rounded ${lang === 'tl' ? 'bg-blue-600 text-white' : 'text-blue-300'}">PH</a>
             </div>
             <a href="/customer/login" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-semibold transition shadow">Login</a>
-            <a href="/customer/register" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-semibold transition shadow">Register</a>
+            <a href="/customer/register" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-semibold transition shadow">Register (15-Day Account Retention)</a>
           </div>
         </div>
       </header>
@@ -417,12 +329,12 @@ app.get('/', async (req, res) => {
 
       <main class="max-w-7xl mx-auto px-6 py-16">
         <div class="text-center max-w-3xl mx-auto mb-16">
-          <span class="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide">Secure Government Assistance</span>
+          <span class="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide">Secure Government Assistance &bull; 30+ Pro Features</span>
           <h1 class="text-4xl md:text-5xl font-black text-blue-950 mt-4 mb-6 leading-tight">
             ${lang === 'tl' ? 'Mabilis at Walang Kahirap-Hirap na Government Application Assistance' : 'Fast & Seamless Government Application Assistance'}
           </h1>
           <p class="text-lg text-slate-600 mb-8">
-            ${lang === 'tl' ? 'Tulong sa pagkuha at pagproseso ng BIR/TIN, SSS, at Pag-IBIG nang ligtas, mabilis, at propesyonal.' : 'We securely and professionally assist you with your BIR/TIN, SSS, and Pag-IBIG registrations and application documents.'}
+            ${lang === 'tl' ? 'Tulong sa pagkuha at pagproseso ng BIR/TIN, SSS, at Pag-IBIG nang ligtas, mabilis, at propesyonal. May kasamang device inquiry at 15-day account retention.' : 'We securely and professionally assist you with your BIR/TIN, SSS, and Pag-IBIG registrations with multi-device device selection and guaranteed 15-day account retention.'}
           </p>
           <div class="flex justify-center gap-4 flex-wrap">
             <a href="/customer/register" class="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition transform hover:-translate-y-0.5">Get Started Now</a>
@@ -448,21 +360,59 @@ app.get('/', async (req, res) => {
           </div>
         </div>
 
-        <div class="bg-slate-900 text-slate-300 p-8 rounded-3xl shadow-2xl mb-16 grid md:grid-cols-2 gap-8 items-center">
-          <div>
-            <h2 class="text-2xl font-bold text-white mb-4">30+ Features Built For Your Convenience</h2>
-            <ul class="space-y-3 text-sm">
-              <li class="flex items-center space-x-2"><span>📱</span> <strong>Device Selection Gateway</strong> (Mobile, Tablet, Desktop customization)</li>
-              <li class="flex items-center space-x-2"><span>⏳</span> <strong>15-Day Long Session Persistence</strong> (No need to re-login every day)</li>
-              <li class="flex items-center space-x-2"><span>✅</span> <strong>Dedicated GCash QR Codes</strong> for BIR, SSS, and Pag-IBIG payments</li>
-              <li class="flex items-center space-x-2"><span>🌐</span> <strong>Bilingual Support</strong> (English and Tagalog language switcher)</li>
-            </ul>
-          </div>
-          <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 text-center">
-            <h3 class="font-bold text-white mb-2">Need Assistance?</h3>
-            <p class="text-xs text-slate-400 mb-4">Contact our support hotline or email us anytime.</p>
-            <p class="text-blue-400 font-bold">${settings.contact_number}</p>
-            <p class="text-blue-400 font-bold">${settings.email}</p>
+        <!-- 30+ FEATURES SHOWCASE SECTION -->
+        <div class="bg-slate-900 text-slate-300 p-8 md:p-12 rounded-3xl shadow-2xl mb-16">
+          <h2 class="text-3xl font-black text-white mb-4 text-center">Power-Packed with 30+ Advanced Features</h2>
+          <p class="text-center text-slate-400 text-sm mb-8">Designed for ultimate reliability, security, and administrative efficiency by <strong>${settings.creator_name}</strong>.</p>
+          
+          <div class="grid md:grid-cols-3 gap-6 text-sm">
+            <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700 space-y-2">
+              <h4 class="font-bold text-blue-400 text-base">Portal & Access Features (1-10)</h4>
+              <ul class="space-y-1 text-xs text-slate-300">
+                <li>1. Customer Mobile/Device Inquiry Wizard</li>
+                <li>2. Guaranteed 15-Day Account & Session Retention</li>
+                <li>3. Secure Bcrypt Password Encryption</li>
+                <li>4. Bilingual Interface (English / Tagalog)</li>
+                <li>5. Public Tracking Number Lookup</li>
+                <li>6. Customer Portal Dashboard</li>
+                <li>7. Role-Based Admin & Customer Separation</li>
+                <li>8. Persistent SQLite Session Storage</li>
+                <li>9. Responsive Tailwind UI Layouts</li>
+                <li>10. Real-time Announcement Banners</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700 space-y-2">
+              <h4 class="font-bold text-emerald-400 text-base">Application & Payment Features (11-20)</h4>
+              <ul class="space-y-1 text-xs text-slate-300">
+                <li>11. Multi-Step Government Application Form</li>
+                <li>12. Dedicated BIR, SSS & Pag-IBIG QR Codes</li>
+                <li>13. GCash Reference Number Validation</li>
+                <li>14. Proof of Payment Receipt Uploads</li>
+                <li>15. Dynamic Civil Status (Marriage Details)</li>
+                <li>16. Dynamic Beneficiary Adder (Multiple)</li>
+                <li>17. Valid ID Photo & Selfie Verification</li>
+                <li>18. Automatic Tracking ID Generator</li>
+                <li>19. Fee Configuration Control Panel</li>
+                <li>20. Payment Verification Workflow</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700 space-y-2">
+              <h4 class="font-bold text-amber-400 text-base">Admin & Advanced Tools (21-30+)</h4>
+              <ul class="space-y-1 text-xs text-slate-300">
+                <li>21. Comprehensive Admin Dashboard Stats</li>
+                <li>22. Advanced Multi-Filter Application Search</li>
+                <li>23. Real-time Status History Timeline</li>
+                <li>24. Admin Remarks & Correction Requests</li>
+                <li>25. Completed Document Uploader for Clients</li>
+                <li>26. Client Support Ticketing System</li>
+                <li>27. Customer Notification Center</li>
+                <li>28. Detailed Admin Audit Trail Logging</li>
+                <li>29. Database JSON Export & Backup Tool</li>
+                <li>30. Printable Application Summary Sheets</li>
+              </ul>
+            </div>
           </div>
         </div>
 
@@ -479,100 +429,122 @@ app.get('/', async (req, res) => {
   `);
 });
 
-// Public Application Tracker
+// Public Tracking Page
 app.get('/track-public', (req, res) => {
-  const trackingNumber = (req.query.tracking_number || '').trim();
+  const trackingNumber = req.query.tracking_number || '';
   const settings = res.locals.settings;
-
-  if (!trackingNumber) {
-    return res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Track Application - ${settings.business_name}</title>
-        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-      </head>
-      <body class="bg-slate-50 text-slate-800 font-sans">
-        <div class="max-w-xl mx-auto px-4 py-16">
-          <div class="text-center mb-8">
-            <h1 class="text-3xl font-black text-blue-950">Track Your Application</h1>
-            <p class="text-sm text-slate-600 mt-2">Enter your unique tracking number below to check real-time status.</p>
-          </div>
-          <form action="/track-public" method="GET" class="bg-white p-8 rounded-2xl shadow-xl space-y-4 mb-6 border border-slate-100">
-            <div>
-              <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">Tracking Number</label>
-              <input type="text" name="tracking_number" required placeholder="e.g. TIN-20260902-1234" class="w-full border border-slate-300 rounded-xl px-4 py-3 uppercase font-mono text-sm focus:ring-2 focus:ring-blue-600 outline-none">
-            </div>
-            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition">Search Status</button>
-          </form>
-          <div class="text-center mt-6">
-            <a href="/" class="text-blue-600 hover:underline text-sm font-semibold">&larr; Back to Home</a>
-          </div>
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Track Application - ${settings.business_name}</title>
+      <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    </head>
+    <body class="bg-slate-50 text-slate-800 font-sans">
+      <div class="max-w-xl mx-auto px-4 py-16">
+        <div class="text-center mb-8">
+          <h1 class="text-3xl font-black text-blue-950">Track Your Application</h1>
+          <p class="text-sm text-slate-600 mt-2">Enter your unique tracking number below to check real-time status.</p>
         </div>
-      </body>
-      </html>
-    `);
-  }
-
-  db.get(`SELECT * FROM applications WHERE tracking_number = ?`, [trackingNumber], (err, app) => {
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Tracking Result - ${settings.business_name}</title>
-        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-      </head>
-      <body class="bg-slate-50 text-slate-800 font-sans">
-        <div class="max-w-xl mx-auto px-4 py-16">
-          <div class="text-center mb-8">
-            <h1 class="text-3xl font-black text-blue-950">Application Status</h1>
+        <form action="/track-public" method="GET" class="bg-white p-8 rounded-2xl shadow-xl space-y-4 mb-6 border border-slate-100">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">Tracking Number</label>
+            <input type="text" name="tracking_number" value="${trackingNumber}" required placeholder="e.g. TIN-20260902-1234" class="w-full border border-slate-300 rounded-xl px-4 py-3 uppercase font-mono text-sm focus:ring-2 focus:ring-blue-600 outline-none">
           </div>
-          ${app ? `
-            <div class="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 space-y-4">
-              <div class="flex justify-between border-b pb-3">
-                <span class="text-xs font-bold text-slate-500 uppercase">Tracking Number</span>
-                <span class="font-mono font-bold text-blue-900">${app.tracking_number}</span>
-              </div>
-              <div class="flex justify-between border-b pb-3">
-                <span class="text-xs font-bold text-slate-500 uppercase">Service</span>
-                <span class="font-bold text-slate-800">${app.service}</span>
-              </div>
-              <div class="flex justify-between border-b pb-3">
-                <span class="text-xs font-bold text-slate-500 uppercase">Application Status</span>
-                <span class="px-3 py-1 bg-blue-100 text-blue-800 rounded-full font-bold text-xs">${app.status}</span>
-              </div>
-              <div class="flex justify-between border-b pb-3">
-                <span class="text-xs font-bold text-slate-500 uppercase">Payment Status</span>
-                <span class="px-3 py-1 bg-amber-100 text-amber-800 rounded-full font-bold text-xs">${app.payment_status}</span>
-              </div>
-              <div class="text-center pt-4">
-                <a href="/customer/login" class="text-blue-600 font-bold hover:underline text-sm">Login to customer portal for complete files and history &rarr;</a>
-              </div>
-            </div>
-          ` : `
-            <div class="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 text-center">
-              <p class="text-red-600 font-bold mb-4">No application found matching tracking number "${trackingNumber}".</p>
-              <a href="/track-public" class="text-blue-600 hover:underline text-sm font-semibold">Try searching again</a>
-            </div>
-          `}
-          <div class="text-center mt-6">
-            <a href="/" class="text-blue-600 hover:underline text-sm font-semibold">&larr; Back to Home</a>
+          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition">Search Status</button>
+        </form>
+        ${trackingNumber ? `
+          <div class="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 text-center">
+            <p class="text-sm text-slate-500 mb-2">Searching for: <strong>${trackingNumber}</strong></p>
+            <a href="/customer/login" class="text-blue-600 font-bold hover:underline text-sm">Login to customer portal for full detailed history &rarr;</a>
           </div>
+        ` : ''}
+        <div class="text-center mt-6">
+          <a href="/" class="text-blue-600 hover:underline text-sm font-semibold">&larr; Back to Home</a>
         </div>
-      </body>
-      </html>
-    `);
-  });
+      </div>
+    </body>
+    </html>
+  `);
 });
 
 // ==========================================
 // CUSTOMER AUTHENTICATION & REGISTRATION
+// (UPDATED: Customer Portal asks device type first before registration/login)
 // ==========================================
+app.get('/customer/device-select', (req, res) => {
+  const settings = res.locals.settings;
+  const redirectAction = req.query.action || 'register'; // 'register' or 'login'
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Select Device - ${settings.business_name}</title>
+      <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    </head>
+    <body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
+      <div class="bg-white w-full max-w-lg p-8 rounded-3xl shadow-2xl border border-slate-100 text-center">
+        <span class="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase">Step 1 of Portal Access</span>
+        <h2 class="text-2xl font-black text-blue-950 mt-3 mb-2">Ano ang gamit mo ngayon?</h2>
+        <p class="text-xs text-slate-500 mb-6">Please select your device type for optimized portal experience and 15-day account retention storage.</p>
+        
+        <form action="/customer/device-select" method="POST" class="space-y-4">
+          <input type="hidden" name="action_type" value="${redirectAction}">
+          
+          <div class="grid grid-cols-2 gap-4">
+            <label class="border-2 p-5 rounded-2xl cursor-pointer hover:border-blue-600 transition flex flex-col items-center bg-slate-50">
+              <input type="radio" name="device_type" value="Mobile" required class="mb-2" checked>
+              <span class="text-3xl mb-1">📱</span>
+              <span class="font-bold text-blue-950 text-sm">Mobile Phone</span>
+              <span class="text-[10px] text-slate-500 mt-1">Smartphone (Android/iOS)</span>
+            </label>
+            <label class="border-2 p-5 rounded-2xl cursor-pointer hover:border-blue-600 transition flex flex-col items-center bg-slate-50">
+              <input type="radio" name="device_type" value="Computer / Laptop" required class="mb-2">
+              <span class="text-3xl mb-1">💻</span>
+              <span class="font-bold text-blue-950 text-sm">Computer / Laptop</span>
+              <span class="text-[10px] text-slate-500 mt-1">Desktop or Notebook</span>
+            </label>
+            <label class="border-2 p-5 rounded-2xl cursor-pointer hover:border-blue-600 transition flex flex-col items-center bg-slate-50">
+              <input type="radio" name="device_type" value="Tablet" required class="mb-2">
+              <span class="text-3xl mb-1">📑</span>
+              <span class="font-bold text-blue-950 text-sm">Tablet / iPad</span>
+              <span class="text-[10px] text-slate-500 mt-1">Portable Touch Device</span>
+            </label>
+            <label class="border-2 p-5 rounded-2xl cursor-pointer hover:border-blue-600 transition flex flex-col items-center bg-slate-50">
+              <input type="radio" name="device_type" value="Other Device" required class="mb-2">
+              <span class="text-3xl mb-1">⚙️</span>
+              <span class="font-bold text-blue-950 text-sm">Other Device</span>
+              <span class="text-[10px] text-slate-500 mt-1">Internet Kiosk / Other</span>
+            </label>
+          </div>
+
+          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg transition text-sm mt-4">Proceed to ${redirectAction === 'login' ? 'Login' : 'Registration'} &rarr;</button>
+        </form>
+        <div class="text-center mt-4"><a href="/" class="text-slate-400 hover:underline text-xs">&larr; Back to home</a></div>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+app.post('/customer/device-select', (req, res) => {
+  const { device_type, action_type } = req.body;
+  req.session.selected_device = device_type;
+  if (action_type === 'login') {
+    res.redirect('/customer/login');
+  } else {
+    res.redirect('/customer/register');
+  }
+});
+
 app.get('/customer/register', (req, res) => {
+  if (!req.session.selected_device) {
+    return res.redirect('/customer/device-select?action=register');
+  }
   const settings = res.locals.settings;
   res.send(`
     <!DOCTYPE html>
@@ -585,8 +557,10 @@ app.get('/customer/register', (req, res) => {
     </head>
     <body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
       <div class="bg-white w-full max-w-md p-8 rounded-3xl shadow-2xl border border-slate-100">
-        <h2 class="text-2xl font-black text-blue-950 mb-2 text-center">Customer Registration</h2>
+        <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">Device: ${req.session.selected_device} &bull; 15-Day Retention Active</span>
+        <h2 class="text-2xl font-black text-blue-950 mt-2 mb-1 text-center">Customer Registration</h2>
         <p class="text-xs text-slate-500 text-center mb-6">System by: ${settings.creator_name}</p>
+        
         <form action="/customer/register" method="POST" class="space-y-4">
           <div>
             <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Full Name</label>
@@ -612,9 +586,9 @@ app.get('/customer/register', (req, res) => {
             <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Confirm Password</label>
             <input type="password" name="confirm_password" required class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 outline-none">
           </div>
-          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition text-sm">Register Account</button>
+          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition text-sm">Register Account (15-Day Retention)</button>
         </form>
-        <p class="text-center text-sm mt-6 text-slate-600">Already have an account? <a href="/customer/login" class="text-blue-600 font-bold hover:underline">Login here</a></p>
+        <p class="text-center text-sm mt-6 text-slate-600">Already have an account? <a href="/customer/device-select?action=login" class="text-blue-600 font-bold hover:underline">Login here</a></p>
       </div>
     </body>
     </html>
@@ -623,13 +597,15 @@ app.get('/customer/register', (req, res) => {
 
 app.post('/customer/register', async (req, res) => {
   const { username, password, confirm_password, full_name, mobile_number, email_address } = req.body;
+  const deviceType = req.session.selected_device || 'Mobile';
+
   if (password !== confirm_password) {
     return res.send(`<script>alert('Passwords do not match!'); window.history.back();</script>`);
   }
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    db.run(`INSERT INTO users (username, password, full_name, mobile_number, email_address) VALUES (?, ?, ?, ?, ?)`,
-      [username, hashedPassword, full_name, mobile_number, email_address], function(err) {
+    db.run(`INSERT INTO users (username, password, full_name, mobile_number, email_address, device_type) VALUES (?, ?, ?, ?, ?, ?)`,
+      [username, hashedPassword, full_name, mobile_number, email_address, deviceType], function(err) {
         if (err) {
           return res.send(`<script>alert('Username already exists or invalid data!'); window.history.back();</script>`);
         }
@@ -641,6 +617,9 @@ app.post('/customer/register', async (req, res) => {
 });
 
 app.get('/customer/login', (req, res) => {
+  if (!req.session.selected_device) {
+    return res.redirect('/customer/device-select?action=login');
+  }
   const settings = res.locals.settings;
   res.send(`
     <!DOCTYPE html>
@@ -653,8 +632,10 @@ app.get('/customer/login', (req, res) => {
     </head>
     <body class="bg-slate-100 flex items-center justify-center min-h-screen p-4">
       <div class="bg-white w-full max-w-md p-8 rounded-3xl shadow-2xl border border-slate-100">
-        <h2 class="text-2xl font-black text-blue-950 mb-2 text-center">Customer Login</h2>
+        <span class="bg-blue-100 text-blue-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">Device: ${req.session.selected_device} &bull; 15-Day Retention Active</span>
+        <h2 class="text-2xl font-black text-blue-950 mt-2 mb-1 text-center">Customer Login</h2>
         <p class="text-xs text-slate-500 text-center mb-6">Created by: ${settings.creator_name}</p>
+        
         <form action="/customer/login" method="POST" class="space-y-4">
           <div>
             <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Username</label>
@@ -664,9 +645,9 @@ app.get('/customer/login', (req, res) => {
             <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Password</label>
             <input type="password" name="password" required class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 outline-none">
           </div>
-          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition text-sm">Login</button>
+          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition text-sm">Login (Retain Account)</button>
         </form>
-        <p class="text-center text-sm mt-6 text-slate-600">Don't have an account? <a href="/customer/register" class="text-blue-600 font-bold hover:underline">Register here</a></p>
+        <p class="text-center text-sm mt-6 text-slate-600">Don't have an account? <a href="/customer/device-select?action=register" class="text-blue-600 font-bold hover:underline">Register here</a></p>
         <div class="text-center mt-4"><a href="/" class="text-slate-400 hover:underline text-xs">&larr; Back to home</a></div>
       </div>
     </body>
@@ -678,11 +659,10 @@ app.post('/customer/login', (req, res) => {
   const { username, password } = req.body;
   db.get(`SELECT * FROM users WHERE username = ?`, [username], async (err, user) => {
     if (user && await bcrypt.compare(password, user.password)) {
-      req.session.customer = { id: user.id, username: user.username, full_name: user.full_name, email: user.email_address };
-      if (user.device_preference) {
-        req.session.device = user.device_preference;
-      }
-      res.redirect('/customer/select-device?redirect=/customer/dashboard');
+      // Update last active time to maintain 15-day account retention rule
+      db.run(`UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = ?`, [user.id]);
+      req.session.customer = { id: user.id, username: user.username, full_name: user.full_name, email: user.email_address, device: user.device_type };
+      res.redirect('/customer/dashboard');
     } else {
       res.send(`<script>alert('Invalid username or password!'); window.history.back();</script>`);
     }
@@ -752,46 +732,57 @@ app.get('/admin/logout', (req, res) => {
 });
 
 // ==========================================
+// MIDDLEWARE GUARDS
+// ==========================================
+function requireCustomer(req, res, next) {
+  if (!req.session.customer) {
+    return res.redirect('/customer/device-select?action=login');
+  }
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.session.admin) {
+    return res.redirect('/admin/login');
+  }
+  next();
+}
+
+// ==========================================
 // CUSTOMER PORTAL & DASHBOARD
 // ==========================================
 function customerLayout(title, content, activeTab, unreadCount = 0, reqSession = null) {
   const customerName = reqSession && reqSession.customer ? reqSession.customer.full_name : '';
+  const customerDevice = reqSession && reqSession.customer ? reqSession.customer.device : 'Mobile';
   const lang = reqSession && reqSession.lang ? reqSession.lang : 'en';
-  const device = reqSession && reqSession.device ? reqSession.device : 'mobile';
-
   return `
     <!DOCTYPE html>
     <html lang="${lang}">
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>${title} - GovAssist PH (${device.toUpperCase()} Mode)</title>
+      <title>${title} - GovAssist PH</title>
       <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     </head>
     <body class="bg-slate-100 text-slate-800 font-sans antialiased">
       <div class="min-h-screen flex flex-col md:flex-row">
         <aside class="bg-blue-950 text-white w-full md:w-72 p-6 flex flex-col justify-between shadow-2xl">
           <div>
-            <div class="mb-6 flex justify-between items-start">
-              <div>
-                <span class="text-xl font-black tracking-tight block">GovAssist PH</span>
-                <span class="text-xs text-blue-300">Created by: Mark Jerald Agdigos</span>
-              </div>
-              <a href="/customer/select-device" class="bg-blue-800 hover:bg-blue-700 text-xs px-2 py-1 rounded font-bold uppercase tracking-wide">
-                ${device === 'mobile' ? '📱 Mobile' : (device === 'tablet' ? '📲 Tablet' : '💻 PC')}
-              </a>
+            <div class="mb-8">
+              <span class="text-xl font-black tracking-tight block">GovAssist PH</span>
+              <span class="text-xs text-blue-300">Device: ${customerDevice} &bull; 15-Day Retention</span>
             </div>
             <nav class="space-y-1.5 text-sm">
-              <a href="/customer/dashboard" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'dashboard' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">📊 Dashboard</a>
-              <a href="/customer/apply" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'apply' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">➕ New Application</a>
-              <a href="/customer/applications" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'applications' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">📋 My Applications</a>
-              <a href="/customer/documents" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'documents' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">📂 Completed Files</a>
-              <a href="/customer/tickets" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'tickets' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">💬 Support Tickets</a>
+              <a href="/customer/dashboard" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'dashboard' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">📊 Dashboard</a>
+              <a href="/customer/apply" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'apply' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">➕ New Application</a>
+              <a href="/customer/applications" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'applications' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">📋 My Applications</a>
+              <a href="/customer/documents" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'documents' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">📂 Completed Files</a>
+              <a href="/customer/tickets" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'tickets' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">💬 Support Tickets</a>
               <a href="/customer/notifications" class="flex items-center justify-between px-4 py-3 rounded-xl transition ${activeTab === 'notifications' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">
                 <span>🔔 Notifications</span>
                 ${unreadCount > 0 ? `<span class="bg-red-500 text-white px-2 py-0.5 rounded-full text-xs font-bold">${unreadCount}</span>` : ''}
               </a>
-              <a href="/customer/profile" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'profile' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">👤 My Profile</a>
+              <a href="/customer/profile" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'profile' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-blue-900 text-blue-200'}">👤 My Profile</a>
             </nav>
           </div>
           <div class="mt-8 pt-4 border-t border-blue-900 space-y-4">
@@ -804,7 +795,7 @@ function customerLayout(title, content, activeTab, unreadCount = 0, reqSession =
           </div>
         </aside>
         
-        <main class="flex-1 p-4 md:p-10 overflow-y-auto">
+        <main class="flex-1 p-6 md:p-12 overflow-y-auto">
           ${content}
         </main>
       </div>
@@ -822,7 +813,8 @@ app.get('/customer/dashboard', requireCustomer, async (req, res) => {
       const completedApps = apps.filter(a => a.status === 'Completed').length;
 
       const content = `
-        <h1 class="text-3xl font-black text-blue-950 mb-6">Customer Dashboard</h1>
+        <h1 class="text-3xl font-black text-blue-950 mb-2">Customer Dashboard</h1>
+        <p class="text-xs text-slate-500 mb-6">Account is secured with guaranteed 15-day account retention policy &bull; Device: ${req.session.customer.device}</p>
         
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div class="bg-white p-6 rounded-2xl shadow-xl border-l-4 border-blue-600 border border-slate-100">
@@ -863,10 +855,7 @@ app.get('/customer/dashboard', requireCustomer, async (req, res) => {
                       <td class="p-3 font-semibold">${app.service}</td>
                       <td class="p-3"><span class="px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full font-bold text-xs">${app.status}</span></td>
                       <td class="p-3"><span class="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full font-bold text-xs">${app.payment_status}</span></td>
-                      <td class="p-3 space-x-2">
-                        <a href="/customer/track/${app.id}" class="text-blue-600 font-bold hover:underline text-xs">View Tracking</a>
-                        <a href="/customer/print/${app.id}" target="_blank" class="text-emerald-600 font-bold hover:underline text-xs">Print Receipt</a>
-                      </td>
+                      <td class="p-3"><a href="/customer/track/${app.id}" class="text-blue-600 font-bold hover:underline text-xs">View Tracking</a></td>
                     </tr>
                   `).join('')}
                 </tbody>
@@ -883,19 +872,9 @@ app.get('/customer/dashboard', requireCustomer, async (req, res) => {
 // Multi-Step Application Wizard Route with Specific BIR, SSS, and Pag-IBIG QR Codes
 app.get('/customer/apply', requireCustomer, async (req, res) => {
   const settings = res.locals.settings;
-
-  if (settings.maintenance_mode === '1') {
-    return res.send(customerLayout('Maintenance', `
-      <div class="bg-amber-50 border border-amber-200 p-8 rounded-3xl text-center">
-        <h2 class="text-2xl font-black text-amber-900 mb-2">System Under Maintenance</h2>
-        <p class="text-slate-600 text-sm">Pansamantalang sarado ang pagtanggap ng mga bagong aplikasyon habang isinasagawa ang maintenance. Subukang muli mamaya.</p>
-      </div>
-    `, 'apply', 0, req.session));
-  }
-
   const content = `
     <h1 class="text-3xl font-black text-blue-950 mb-6">New Government Application</h1>
-    <form action="/customer/apply" method="POST" enctype="multipart/form-data" class="bg-white p-6 md:p-12 rounded-3xl shadow-2xl space-y-10 border border-slate-100" id="appForm">
+    <form action="/customer/apply" method="POST" enctype="multipart/form-data" class="bg-white p-8 md:p-12 rounded-3xl shadow-2xl space-y-10 border border-slate-100" id="appForm">
       
       <div class="space-y-4">
         <h2 class="text-xl font-black text-blue-950 border-b pb-2 flex items-center justify-between">
@@ -1353,10 +1332,7 @@ app.get('/customer/applications', requireCustomer, (req, res) => {
                     <td class="p-3"><span class="px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full font-bold text-xs">${app.status}</span></td>
                     <td class="p-3"><span class="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full font-bold text-xs">${app.payment_status}</span></td>
                     <td class="p-3 text-xs text-slate-500">${app.created_at}</td>
-                    <td class="p-3 space-x-2">
-                      <a href="/customer/track/${app.id}" class="text-blue-600 font-bold hover:underline text-xs">Track Details</a>
-                      <a href="/customer/print/${app.id}" target="_blank" class="text-emerald-600 font-bold hover:underline text-xs">Receipt</a>
-                    </td>
+                    <td class="p-3"><a href="/customer/track/${app.id}" class="text-blue-600 font-bold hover:underline text-xs">Track & Details</a></td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -1366,65 +1342,6 @@ app.get('/customer/applications', requireCustomer, (req, res) => {
       </div>
     `;
     res.send(customerLayout('My Applications', content, 'applications', 0, req.session));
-  });
-});
-
-// Printable Receipt / Summary View (Feature #11)
-app.get('/customer/print/:id', requireCustomer, (req, res) => {
-  const appId = req.params.id;
-  const customerId = req.session.customer.id;
-  const settings = res.locals.settings;
-
-  db.get(`SELECT a.*, u.full_name, u.email_address, u.mobile_number FROM applications a JOIN users u ON a.customer_id = u.id WHERE a.id = ? AND a.customer_id = ?`, [appId, customerId], (err, app) => {
-    if (!app) return res.send(`Application not found.`);
-
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <title>Application Receipt - ${app.tracking_number}</title>
-        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-        <style>@media print { .no-print { display: none; } }</style>
-      </head>
-      <body class="bg-white text-slate-900 p-8 max-w-2xl mx-auto border my-8 shadow-lg font-sans">
-        <div class="no-print mb-6 text-right">
-          <button onclick="window.print()" class="bg-blue-600 text-white px-6 py-2 rounded-xl text-xs font-bold">Print Receipt / Save PDF</button>
-        </div>
-        <div class="border-b pb-6 mb-6 flex justify-between items-center">
-          <div>
-            <h1 class="text-2xl font-black text-blue-950">${settings.business_name}</h1>
-            <p class="text-xs text-slate-500">Official Assistance Document Summary</p>
-          </div>
-          <div class="text-right">
-            <span class="text-xs text-slate-400 block uppercase">Tracking No.</span>
-            <span class="font-mono font-black text-lg text-blue-900">${app.tracking_number}</span>
-          </div>
-        </div>
-
-        <div class="space-y-4 text-sm">
-          <div class="grid grid-cols-2 gap-4 border-b pb-4">
-            <div><span class="text-xs text-slate-500 block uppercase">Applicant Name</span> <strong>${app.full_name}</strong></div>
-            <div><span class="text-xs text-slate-500 block uppercase">Service Applied</span> <strong>${app.service}</strong></div>
-            <div><span class="text-xs text-slate-500 block uppercase">Contact Mobile</span> <span>${app.mobile_number}</span></div>
-            <div><span class="text-xs text-slate-500 block uppercase">Date Submitted</span> <span>${app.created_at}</span></div>
-          </div>
-
-          <div class="border-b pb-4">
-            <span class="text-xs text-slate-500 block uppercase mb-1">Status Overview</span>
-            <div class="flex gap-4">
-              <span class="px-3 py-1 bg-blue-100 text-blue-800 rounded-full font-bold text-xs">Application: ${app.status}</span>
-              <span class="px-3 py-1 bg-amber-100 text-amber-800 rounded-full font-bold text-xs">Payment: ${app.payment_status}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-12 text-center text-xs text-slate-400 border-t pt-4">
-          <p>Created by: ${settings.creator_name} &bull; ${settings.contact_number}</p>
-        </div>
-      </body>
-      </html>
-    `);
   });
 });
 
@@ -1444,10 +1361,7 @@ app.get('/customer/track/:id', requireCustomer, (req, res) => {
                 <h1 class="text-3xl font-black text-blue-950">Application Tracking</h1>
                 <p class="text-xs font-mono text-slate-500 mt-1">Tracking Number: ${app.tracking_number}</p>
               </div>
-              <div class="space-x-2">
-                <a href="/customer/print/${app.id}" target="_blank" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition">Print Receipt</a>
-                <a href="/customer/applications" class="bg-slate-200 hover:bg-slate-300 px-4 py-2 rounded-xl text-xs font-bold transition">&larr; Back</a>
-              </div>
+              <a href="/customer/applications" class="bg-slate-200 hover:bg-slate-300 px-4 py-2 rounded-xl text-xs font-bold transition">&larr; Back to Applications</a>
             </div>
 
             <div class="grid md:grid-cols-3 gap-6 mb-8">
@@ -1539,6 +1453,7 @@ app.get('/customer/documents', requireCustomer, (req, res) => {
   });
 });
 
+// Support Tickets Feature
 app.get('/customer/tickets', requireCustomer, (req, res) => {
   const customerId = req.session.customer.id;
   db.all(`SELECT * FROM tickets WHERE customer_id = ? ORDER BY id DESC`, [customerId], (err, tickets) => {
@@ -1622,6 +1537,10 @@ app.get('/customer/profile', requireCustomer, (req, res) => {
           <input type="text" value="${user.username}" disabled class="w-full border rounded-xl px-3 py-2 bg-slate-100 text-slate-600 text-sm">
         </div>
         <div>
+          <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Primary Device</label>
+          <input type="text" value="${user.device_type || 'Mobile'}" disabled class="w-full border rounded-xl px-3 py-2 bg-slate-100 text-slate-600 text-sm">
+        </div>
+        <div>
           <label class="block text-xs font-bold uppercase text-slate-600 mb-1">Mobile Number</label>
           <input type="text" name="mobile_number" value="${user.mobile_number}" required class="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm">
         </div>
@@ -1653,7 +1572,7 @@ app.post('/customer/profile', requireCustomer, async (req, res) => {
 });
 
 // ==========================================
-// ADMIN PORTAL & MANAGEMENT
+// ADMIN PORTAL & DASHBOARD
 // ==========================================
 function adminLayout(title, content, activeTab) {
   return `
@@ -1674,14 +1593,14 @@ function adminLayout(title, content, activeTab) {
               <span class="text-xs text-slate-400">Developer: Mark Jerald Agdigos</span>
             </div>
             <nav class="space-y-1.5 text-sm">
-              <a href="/admin/dashboard" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'dashboard' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">📊 Dashboard</a>
-              <a href="/admin/applications" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'applications' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">📋 All Applications</a>
-              <a href="/admin/payments" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'payments' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">💳 Payments & Verification</a>
-              <a href="/admin/tickets" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'tickets' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">💬 Support Tickets</a>
-              <a href="/admin/users" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'users' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">👥 Customer Accounts</a>
-              <a href="/admin/settings" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'settings' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">⚙️ Settings & QR Codes</a>
-              <a href="/admin/audit" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'audit' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">📜 Audit Logs</a>
-              <a href="/admin/backup" class="flex items-center space-x-2 px-4 py-3 rounded-xl transition ${activeTab === 'backup' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">💾 Backup Database</a>
+              <a href="/admin/dashboard" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'dashboard' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">📊 Dashboard</a>
+              <a href="/admin/applications" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'applications' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">📋 All Applications</a>
+              <a href="/admin/payments" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'payments' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">💳 Payments & Verification</a>
+              <a href="/admin/tickets" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'tickets' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">💬 Support Tickets</a>
+              <a href="/admin/users" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'users' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">👥 Customer Accounts</a>
+              <a href="/admin/settings" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'settings' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">⚙️ Settings, Fees & QR Codes</a>
+              <a href="/admin/audit" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'audit' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">📜 Audit Logs</a>
+              <a href="/admin/backup" class="flex items-center space-px px-4 py-3 rounded-xl transition ${activeTab === 'backup' ? 'bg-blue-600 font-bold shadow-lg' : 'hover:bg-slate-900 text-slate-300'}">💾 Backup / Export JSON</a>
             </nav>
           </div>
           <div class="mt-8 pt-4 border-t border-slate-800">
@@ -1748,12 +1667,13 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
               </div>
               <div class="bg-slate-950 p-6 rounded-3xl shadow-xl md:col-span-2 border border-slate-800 flex flex-col justify-between">
                 <div>
-                  <h3 class="font-black text-white mb-2">System Quick Actions & Stats</h3>
-                  <p class="text-xs text-slate-400 mb-4">Manage queue, verify payments, and oversee customer accounts seamlessly.</p>
+                  <h3 class="font-black text-white mb-2">30+ Features & Quick Actions</h3>
+                  <p class="text-xs text-slate-400 mb-4">Manage queue, verify payments, review customer device info, and oversee 15-day account retention effortlessly.</p>
                 </div>
                 <div class="flex gap-4 flex-wrap">
                   <a href="/admin/applications" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition">Manage Applications</a>
                   <a href="/admin/payments" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition">Verify Payments</a>
+                  <a href="/admin/users" class="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition">Customer Accounts</a>
                   <a href="/admin/tickets" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition">Support Tickets (${openTickets.length})</a>
                   <a href="/admin/settings" class="bg-slate-800 hover:bg-slate-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition">Settings & QR</a>
                 </div>
@@ -1819,28 +1739,15 @@ app.get('/admin/applications', requireAdmin, (req, res) => {
           </select>
         </div>
         <div class="flex items-end">
-          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-xl text-sm transition">Filter Applications</button>
+          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-xl text-sm transition">Filter</button>
         </div>
       </form>
 
-      <form action="/admin/applications/bulk-update" method="POST" class="bg-slate-950 p-6 rounded-3xl shadow-xl border border-slate-800">
-        <div class="flex justify-between items-center mb-4">
-          <h3 class="font-bold text-white">Bulk Actions</h3>
-          <div class="flex gap-2">
-            <select name="bulk_status" class="border border-slate-700 bg-slate-900 text-xs text-white rounded-xl px-3 py-2">
-              <option value="Under Review">Set to Under Review</option>
-              <option value="Processing">Set to Processing</option>
-              <option value="Completed">Set to Completed</option>
-            </select>
-            <button type="submit" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-4 py-2 rounded-xl text-xs">Apply Bulk Update</button>
-          </div>
-        </div>
-
+      <div class="bg-slate-950 p-6 rounded-3xl shadow-xl border border-slate-800">
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse">
             <thead>
               <tr class="border-b border-slate-800 bg-slate-900 text-xs text-slate-400 uppercase">
-                <th class="p-3"><input type="checkbox" onclick="document.querySelectorAll('.app-checkbox').forEach(c => c.checked = this.checked)"></th>
                 <th class="p-3">Applicant</th>
                 <th class="p-3">Service</th>
                 <th class="p-3">Tracking Number</th>
@@ -1851,197 +1758,225 @@ app.get('/admin/applications', requireAdmin, (req, res) => {
               </tr>
             </thead>
             <tbody class="text-sm">
-              ${apps.map(app => `
+              ${apps.length === 0 ? `<tr><td colspan="7" class="p-4 text-center text-slate-500">No applications found.</td></tr>` : apps.map(app => `
                 <tr class="border-b border-slate-800 hover:bg-slate-900 transition">
-                  <td class="p-3"><input type="checkbox" name="app_ids[]" value="${app.id}" class="app-checkbox"></td>
                   <td class="p-3 font-bold">${app.customer_name}</td>
-                  <td class="p-3 font-semibold text-blue-400">${app.service}</td>
-                  <td class="p-3 font-mono font-bold text-slate-300">${app.tracking_number}</td>
-                  <td class="p-3"><span class="px-2.5 py-1 bg-blue-900 text-blue-200 rounded-full font-bold text-xs">${app.status}</span></td>
-                  <td class="p-3"><span class="px-2.5 py-1 bg-amber-900 text-amber-200 rounded-full font-bold text-xs">${app.payment_status}</span></td>
+                  <td class="p-3">${app.service}</td>
+                  <td class="p-3 font-mono text-blue-400">${app.tracking_number}</td>
+                  <td class="p-3"><span class="px-2.5 py-1 bg-blue-900 text-blue-200 rounded-full text-xs font-bold">${app.status}</span></td>
+                  <td class="p-3"><span class="px-2.5 py-1 bg-amber-950 text-amber-300 rounded-full text-xs font-bold">${app.payment_status}</span></td>
                   <td class="p-3 text-xs text-slate-400">${app.created_at}</td>
-                  <td class="p-3"><a href="/admin/application/${app.id}" class="text-blue-400 font-bold hover:underline text-xs">Review & Process &rarr;</a></td>
+                  <td class="p-3"><a href="/admin/applications/${app.id}" class="text-blue-400 font-bold hover:underline text-xs">Review Profile</a></td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
         </div>
-      </form>
+      </div>
     `;
-    res.send(adminLayout('Manage Applications', content, 'applications'));
+    res.send(adminLayout('Applications', content, 'applications'));
   });
 });
 
-app.post('/admin/applications/bulk-update', requireAdmin, (req, res) => {
-  const { app_ids, bulk_status } = req.body;
-  if (app_ids && Array.isArray(app_ids) && app_ids.length > 0) {
-    const placeholders = app_ids.map(() => '?').join(',');
-    db.run(`UPDATE applications SET status = ? WHERE id IN (${placeholders})`, [bulk_status, ...app_ids], () => {
-      logAudit(req.session.admin.username, `Bulk updated ${app_ids.length} applications to status ${bulk_status}`);
-      res.redirect('/admin/applications');
-    });
-  } else {
-    res.redirect('/admin/applications');
-  }
-});
-
-app.get('/admin/application/:id', requireAdmin, (req, res) => {
+app.get('/admin/applications/:id', requireAdmin, (req, res) => {
   const appId = req.params.id;
-  db.get(`SELECT a.*, u.full_name as customer_name, u.email_address, u.mobile_number FROM applications a JOIN users u ON a.customer_id = u.id WHERE a.id = ?`, [appId], (err, app) => {
-    if (!app) return res.send(`Application not found.`);
+  db.get(`SELECT a.*, u.full_name as customer_name, u.username, u.email_address, u.mobile_number, u.device_type FROM applications a JOIN users u ON a.customer_id = u.id WHERE a.id = ?`, [appId], (err, app) => {
+    if (!app) return res.send(`<p>Application not found.</p>`);
 
-    db.all(`SELECT * FROM documents WHERE application_id = ?`, [appId], (err2, docs) => {
-      db.all(`SELECT * FROM beneficiaries WHERE application_id = ?`, [appId], (err3, bens) => {
+    db.all(`SELECT * FROM beneficiaries WHERE application_id = ?`, [appId], (err2, beneficiaries) => {
+      db.all(`SELECT * FROM documents WHERE application_id = ?`, [appId], (err3, documents) => {
         db.all(`SELECT * FROM completed_files WHERE application_id = ?`, [appId], (err4, completedFiles) => {
+          db.get(`SELECT * FROM payments WHERE application_id = ?`, [appId], (err5, payment) => {
 
-          const formData = JSON.parse(app.data_json || '{}');
+            const formData = JSON.parse(app.data_json || '{}');
 
-          const content = `
-            <div class="flex justify-between items-center mb-6">
-              <h1 class="text-3xl font-black text-white">Review Application: ${app.tracking_number}</h1>
-              <a href="/admin/applications" class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-xs font-bold">&larr; Back to List</a>
-            </div>
-
-            <div class="grid md:grid-cols-3 gap-6 mb-8">
-              <div class="bg-slate-950 p-6 rounded-3xl border border-slate-800 md:col-span-2 space-y-4">
-                <h3 class="font-black text-blue-400 text-lg border-b border-slate-800 pb-2">Applicant Submitted Form Data</h3>
-                <div class="grid grid-cols-2 gap-4 text-sm">
-                  <div><span class="text-xs text-slate-400 block">Applicant Name</span> <strong>${app.customer_name}</strong></div>
-                  <div><span class="text-xs text-slate-400 block">Mobile Number</span> <span>${app.mobile_number}</span></div>
-                  <div><span class="text-xs text-slate-400 block">Date of Birth</span> <span>${formData.date_of_birth || 'N/A'}</span></div>
-                  <div><span class="text-xs text-slate-400 block">Place of Birth</span> <span>${formData.place_of_birth || 'N/A'}</span></div>
-                  <div><span class="text-xs text-slate-400 block">Civil Status</span> <span>${formData.civil_status || 'N/A'}</span></div>
-                  <div><span class="text-xs text-slate-400 block">Employment Status</span> <span>${formData.employment_status || 'N/A'}</span></div>
-                  <div><span class="text-xs text-slate-400 block">Father's Name</span> <span>${formData.father_name || 'N/A'}</span></div>
-                  <div><span class="text-xs text-slate-400 block">Mother's Maiden Name</span> <span>${formData.mother_maiden_name || 'N/A'}</span></div>
+            const content = `
+              <div class="flex justify-between items-center mb-6">
+                <div>
+                  <h1 class="text-3xl font-black text-white">Applicant Profile & Review</h1>
+                  <p class="text-xs font-mono text-slate-400 mt-1">Tracking: ${app.tracking_number} &bull; Service: ${app.service} &bull; Device: ${app.device_type || 'Mobile'}</p>
                 </div>
+                <div class="space-x-2">
+                  <a href="/admin/print/${app.id}" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition">Print Summary</a>
+                  <a href="/admin/applications" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition">&larr; Back</a>
+                </div>
+              </div>
 
-                ${bens.length > 0 ? `
-                  <h4 class="font-bold text-white text-sm border-t border-slate-800 pt-4 mt-4">Declared Beneficiaries</h4>
-                  <div class="space-y-2">
-                    ${bens.map(b => `<div class="bg-slate-900 p-3 rounded-xl text-xs border border-slate-800"><strong>${b.full_name}</strong> (${b.relationship}) - DOB: ${b.birth_date}</div>`).join('')}
+              <div class="bg-slate-950 p-6 rounded-3xl shadow-xl mb-8 border border-slate-800">
+                <h3 class="font-black text-white mb-4">Application Controls & Status</h3>
+                <form action="/admin/applications/${app.id}/status" method="POST" class="grid md:grid-cols-3 gap-4 items-end">
+                  <div>
+                    <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Update Status</label>
+                    <select name="status" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
+                      <option value="Submitted" ${app.status === 'Submitted' ? 'selected' : ''}>Submitted</option>
+                      <option value="Under Review" ${app.status === 'Under Review' ? 'selected' : ''}>Under Review</option>
+                      <option value="Need Correction" ${app.status === 'Need Correction' ? 'selected' : ''}>Need Correction</option>
+                      <option value="Payment Verified" ${app.status === 'Payment Verified' ? 'selected' : ''}>Payment Verified</option>
+                      <option value="Processing" ${app.status === 'Processing' ? 'selected' : ''}>Processing</option>
+                      <option value="Ready" ${app.status === 'Ready' ? 'selected' : ''}>Ready</option>
+                      <option value="Completed" ${app.status === 'Completed' ? 'selected' : ''}>Completed</option>
+                      <option value="Rejected" ${app.status === 'Rejected' ? 'selected' : ''}>Rejected</option>
+                    </select>
                   </div>
-                ` : ''}
+                  <div>
+                    <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Admin Remarks / Correction Request</label>
+                    <input type="text" name="admin_remarks" value="${app.admin_remarks || ''}" placeholder="Message to customer..." class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
+                  </div>
+                  <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-sm transition">Save Status</button>
+                </form>
+              </div>
 
-                <h4 class="font-bold text-white text-sm border-t border-slate-800 pt-4 mt-4">Uploaded Documents</h4>
-                <div class="grid grid-cols-2 gap-3">
-                  ${docs.map(d => `
-                    <div class="bg-slate-900 p-3 rounded-xl border border-slate-800 text-xs">
-                      <span class="font-bold block text-blue-400 uppercase">${d.doc_type}</span>
-                      <a href="${d.file_path}" target="_blank" class="text-slate-300 hover:underline mt-1 block truncate">${d.file_name}</a>
+              <div class="bg-slate-950 border border-slate-800 p-8 rounded-3xl shadow-xl mb-8 space-y-4">
+                <h3 class="font-black text-white text-lg">Application Data for ${app.service}</h3>
+                <div class="grid md:grid-cols-3 gap-4 text-sm bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                  <div><strong>Full Name:</strong> ${formData.first_name || ''} ${formData.middle_name || ''} ${formData.last_name || ''} ${formData.suffix || ''}</div>
+                  <div><strong>Date of Birth:</strong> ${formData.date_of_birth || ''}</div>
+                  <div><strong>Place of Birth:</strong> ${formData.place_of_birth || ''}</div>
+                  <div><strong>Sex:</strong> ${formData.sex || ''}</div>
+                  <div><strong>Civil Status:</strong> ${formData.civil_status || ''}</div>
+                  <div><strong>Nationality:</strong> ${formData.nationality || ''}</div>
+                  <div><strong>Mobile:</strong> ${formData.mobile_number || ''}</div>
+                  <div><strong>Email:</strong> ${formData.email_address || ''}</div>
+                  <div class="md:col-span-3"><strong>Complete Address:</strong> ${formData.street || ''}, ${formData.barangay || ''}, ${formData.city || ''}, ${formData.province || ''} (${formData.zip_code || ''})</div>
+                  <div><strong>Father's Name:</strong> ${formData.father_name || ''} (${formData.father_dob || ''})</div>
+                  <div><strong>Mother's Maiden Name:</strong> ${formData.mother_maiden_name || ''} (${formData.mother_dob || ''})</div>
+                  ${formData.civil_status === 'Married' ? `
+                    <div class="md:col-span-3 border-t border-slate-800 pt-2"><strong>Spouse:</strong> ${formData.spouse_name || 'N/A'} (DOB: ${formData.spouse_dob || 'N/A'}, Married: ${formData.marriage_date || 'N/A'})</div>
+                  ` : ''}
+                  <div class="md:col-span-3 border-t border-slate-800 pt-2"><strong>Employment:</strong> ${formData.employment_status || ''} - ${formData.occupation || ''} (${formData.employer_name || 'N/A'})</div>
+                </div>
+              </div>
+
+              <div class="bg-slate-950 p-6 rounded-3xl shadow-xl mb-8 border border-slate-800">
+                <h3 class="font-black text-white mb-4">Beneficiaries (${beneficiaries.length})</h3>
+                ${beneficiaries.length === 0 ? `<p class="text-sm text-slate-500">No beneficiaries listed.</p>` : `
+                  <div class="grid md:grid-cols-2 gap-4">
+                    ${beneficiaries.map((b, idx) => `
+                      <div class="border border-slate-800 p-4 rounded-2xl bg-slate-900 text-sm space-y-1">
+                        <span class="font-bold text-blue-400">Beneficiary ${idx + 1}: ${b.full_name}</span>
+                        <p class="text-xs text-slate-400">Relationship: <strong>${b.relationship}</strong> &bull; DOB: ${b.birth_date}</p>
+                        <p class="text-xs text-slate-400">Address: ${b.address}</p>
+                        <p class="text-xs text-slate-400">Contact: ${b.contact_number}</p>
+                      </div>
+                    `).join('')}
+                  </div>
+                `}
+              </div>
+
+              <div class="bg-slate-950 p-6 rounded-3xl shadow-xl mb-8 border border-slate-800">
+                <h3 class="font-black text-white mb-4">Submitted Documents</h3>
+                <div class="grid md:grid-cols-3 gap-4">
+                  ${documents.map(d => `
+                    <div class="border border-slate-800 p-4 rounded-2xl bg-slate-900 space-y-2">
+                      <span class="font-bold text-xs uppercase text-blue-400 block">${d.doc_type.replace(/_/g, ' ')}</span>
+                      <p class="text-xs text-slate-300 truncate">${d.file_name}</p>
+                      <a href="${d.file_path}" target="_blank" class="block text-center bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded-xl font-bold text-xs">View File</a>
                     </div>
                   `).join('')}
                 </div>
               </div>
 
-              <div class="bg-slate-950 p-6 rounded-3xl border border-slate-800 space-y-6">
-                <form action="/admin/application/${app.id}/update-status" method="POST" class="space-y-4">
-                  <h3 class="font-black text-white text-base border-b border-slate-800 pb-2">Update Application Status</h3>
-                  <div>
-                    <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Status</label>
-                    <select name="status" class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
-                      <option value="Submitted" ${app.status === 'Submitted' ? 'selected' : ''}>Submitted</option>
-                      <option value="Under Review" ${app.status === 'Under Review' ? 'selected' : ''}>Under Review</option>
-                      <option value="Processing" ${app.status === 'Processing' ? 'selected' : ''}>Processing</option>
-                      <option value="Completed" ${app.status === 'Completed' ? 'selected' : ''}>Completed</option>
-                      <option value="Rejected" ${app.status === 'Rejected' ? 'selected' : ''}>Rejected / Correction Required</option>
-                    </select>
+              <div class="bg-slate-950 p-6 rounded-3xl shadow-xl mb-8 border border-slate-800">
+                <h3 class="font-black text-white mb-4">Upload Completed Government Document (e.g. BIR Form 1901, SSS E-1, Pag-IBIG MID)</h3>
+                <form action="/admin/applications/${app.id}/completed" method="POST" enctype="multipart/form-data" class="space-y-4">
+                  <div class="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-xs font-bold uppercase text-slate-400 mb-1">File Name / Title</label>
+                      <input type="text" name="file_name" required placeholder="e.g. Official TIN Certificate / SSS Stub" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
+                    </div>
+                    <div>
+                      <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Description</label>
+                      <input type="text" name="description" placeholder="Approved and processed document" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
+                    </div>
+                    <div class="md:col-span-2">
+                      <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Select File (PDF or Image)</label>
+                      <input type="file" name="completed_file" required accept="image/*,application/pdf" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-xs text-white">
+                    </div>
                   </div>
-                  <div>
-                    <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Admin Remarks / Notes for Customer</label>
-                    <textarea name="admin_remarks" rows="3" class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">${app.admin_remarks || ''}</textarea>
-                  </div>
-                  <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs">Update Status</button>
-                </form>
-
-                <form action="/admin/application/${app.id}/upload-completed" method="POST" enctype="multipart/form-data" class="space-y-4 border-t border-slate-800 pt-4">
-                  <h3 class="font-black text-white text-base border-b border-slate-800 pb-2">Upload Final Completed File</h3>
-                  <div>
-                    <label class="block text-xs font-bold uppercase text-slate-400 mb-1">File Description</label>
-                    <input type="text" name="description" placeholder="e.g. Official TIN Slip / SSS Form" required class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
-                  </div>
-                  <div>
-                    <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Upload Approved Document</label>
-                    <input type="file" name="completed_file" required class="w-full text-xs text-slate-400">
-                  </div>
-                  <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs">Upload Completed Document</button>
+                  <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-2.5 rounded-xl text-xs transition">Upload & Notify Client</button>
                 </form>
               </div>
-            </div>
-          `;
-          res.send(adminLayout('Application Details', content, 'applications'));
+            `;
+            res.send(adminLayout('Review Application', content, 'applications'));
+          });
         });
       });
     });
   });
 });
 
-app.post('/admin/application/:id/update-status', requireAdmin, (req, res) => {
+app.post('/admin/applications/:id/status', requireAdmin, (req, res) => {
   const appId = req.params.id;
   const { status, admin_remarks } = req.body;
-  
-  db.get(`SELECT * FROM applications WHERE id = ?`, [appId], (err, app) => {
-    db.run(`UPDATE applications SET status = ?, admin_remarks = ? WHERE id = ?`, [status, admin_remarks, appId], () => {
-      logStatusHistory(appId, status, admin_remarks);
-      addNotification(app.customer_id, `Application Status Update: ${status}`, `Your application ${app.tracking_number} status is now: ${status}`);
-      logAudit(req.session.admin.username, `Updated status for application ${app.tracking_number} to ${status}`);
-      res.redirect(`/admin/application/${appId}`);
-    });
+
+  db.get(`SELECT customer_id, tracking_number FROM applications WHERE id = ?`, [appId], (err, app) => {
+    if (app) {
+      db.run(`UPDATE applications SET status = ?, admin_remarks = ? WHERE id = ?`, [status, admin_remarks, appId], () => {
+        logStatusHistory(appId, status, admin_remarks);
+        addNotification(app.customer_id, `Application Status Updated: ${status}`, `Your application ${app.tracking_number} status has been updated to ${status}. ${admin_remarks ? 'Remarks: ' + admin_remarks : ''}`);
+        res.redirect(`/admin/applications/${appId}`);
+      });
+    } else {
+      res.redirect('/admin/applications');
+    }
   });
 });
 
-app.post('/admin/application/:id/upload-completed', requireAdmin, upload.single('completed_file'), (req, res) => {
+const cfUpload = upload.single('completed_file');
+app.post('/admin/applications/:id/completed', requireAdmin, cfUpload, (req, res) => {
   const appId = req.params.id;
-  const { description } = req.body;
+  const { file_name, description } = req.body;
   const file = req.file;
 
-  if (file) {
-    db.run(`INSERT INTO completed_files (application_id, file_path, file_name, file_type, description) VALUES (?, ?, ?, ?, ?)`,
-      [appId, '/uploads/' + file.filename, file.originalname, file.mimetype, description], () => {
-        db.get(`SELECT * FROM applications WHERE id = ?`, [appId], (err, app) => {
-          addNotification(app.customer_id, 'Completed Document Ready', `A completed document for application ${app.tracking_number} has been uploaded.`);
-          logAudit(req.session.admin.username, `Uploaded completed file for application ${app.tracking_number}`);
-          res.redirect(`/admin/application/${appId}`);
+  if (!file) return res.send(`<script>alert('Please select a file to upload!'); window.history.back();</script>`);
+
+  db.get(`SELECT customer_id, tracking_number FROM applications WHERE id = ?`, [appId], (err, app) => {
+    if (app) {
+      db.run(`INSERT INTO completed_files (application_id, file_path, file_name, file_type, description) VALUES (?, ?, ?, ?, ?)`,
+        [appId, '/uploads/' + file.filename, file_name, file.mimetype, description], () => {
+          logStatusHistory(appId, 'Completed', `Completed file uploaded: ${file_name}`);
+          db.run(`UPDATE applications SET status = 'Completed' WHERE id = ?`, [appId]);
+          addNotification(app.customer_id, 'Completed Document Ready!', `Your official document for application ${app.tracking_number} is now ready for download.`);
+          res.redirect(`/admin/applications/${appId}`);
         });
-      });
-  } else {
-    res.redirect(`/admin/application/${appId}`);
-  }
+    } else {
+      res.redirect('/admin/applications');
+    }
+  });
 });
 
+// Admin Payments Management
 app.get('/admin/payments', requireAdmin, (req, res) => {
   db.all(`SELECT p.*, u.full_name as customer_name FROM payments p JOIN users u ON p.customer_id = u.id ORDER BY p.id DESC`, [], (err, payments) => {
     const content = `
-      <h1 class="text-3xl font-black text-white mb-6">Payment Verification Desk</h1>
+      <h1 class="text-3xl font-black text-white mb-6">Payment Verification</h1>
       <div class="bg-slate-950 p-6 rounded-3xl shadow-xl border border-slate-800">
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse">
             <thead>
               <tr class="border-b border-slate-800 bg-slate-900 text-xs text-slate-400 uppercase">
                 <th class="p-3">Customer</th>
-                <th class="p-3">Tracking #</th>
-                <th class="p-3">Service</th>
-                <th class="p-3">Amount</th>
-                <th class="p-3">Ref Number</th>
+                <th class="p-3">Tracking # / Service</th>
+                <th class="p-3">Method & Amount</th>
+                <th class="p-3">Reference #</th>
                 <th class="p-3">Proof</th>
                 <th class="p-3">Status</th>
                 <th class="p-3">Action</th>
               </tr>
             </thead>
             <tbody class="text-sm">
-              ${payments.map(p => `
+              ${payments.length === 0 ? `<tr><td colspan="7" class="p-4 text-center text-slate-500">No payments recorded.</td></tr>` : payments.map(p => `
                 <tr class="border-b border-slate-800 hover:bg-slate-900 transition">
                   <td class="p-3 font-bold">${p.customer_name}</td>
-                  <td class="p-3 font-mono font-bold text-slate-300">${p.tracking_number}</td>
-                  <td class="p-3 font-semibold text-blue-400">${p.service}</td>
-                  <td class="p-3 font-bold text-emerald-400">₱${p.amount}</td>
+                  <td class="p-3"><span class="font-mono text-blue-400 block">${p.tracking_number}</span><span class="text-xs text-slate-400">${p.service}</span></td>
+                  <td class="p-3">${p.payment_method}<br><strong class="text-emerald-400">₱${p.amount}</strong></td>
                   <td class="p-3 font-mono text-xs">${p.reference_number || 'N/A'}</td>
-                  <td class="p-3">
-                    ${p.proof_path ? `<a href="${p.proof_path}" target="_blank" class="text-blue-400 font-bold hover:underline text-xs">View Receipt</a>` : '<span class="text-xs text-slate-500">None</span>'}
-                  </td>
-                  <td class="p-3"><span class="px-2.5 py-1 bg-amber-900 text-amber-200 rounded-full font-bold text-xs">${p.payment_status}</span></td>
+                  <td class="p-3">${p.proof_path ? `<a href="${p.proof_path}" target="_blank" class="text-blue-400 font-bold hover:underline text-xs">View Receipt</a>` : 'No receipt'}</td>
+                  <td class="p-3"><span class="px-2.5 py-1 bg-amber-950 text-amber-300 rounded-full text-xs font-bold">${p.payment_status}</span></td>
                   <td class="p-3 space-x-2">
-                    <a href="/admin/payment/${p.id}/verify" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded-lg font-bold text-xs">Verify</a>
+                    <form action="/admin/payments/${p.id}/verify" method="POST" class="inline">
+                      <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded-lg text-xs font-bold">Verify</button>
+                    </form>
                   </td>
                 </tr>
               `).join('')}
@@ -2050,91 +1985,49 @@ app.get('/admin/payments', requireAdmin, (req, res) => {
         </div>
       </div>
     `;
-    res.send(adminLayout('Payment Verification', content, 'payments'));
+    res.send(adminLayout('Payments', content, 'payments'));
   });
 });
 
-app.get('/admin/payment/:id/verify', requireAdmin, (req, res) => {
-  const payId = req.params.id;
-  db.get(`SELECT * FROM payments WHERE id = ?`, [payId], (err, payment) => {
+app.post('/admin/payments/:id/verify', requireAdmin, (req, res) => {
+  const paymentId = req.params.id;
+  db.get(`SELECT application_id, customer_id, tracking_number FROM payments WHERE id = ?`, [paymentId], (err, payment) => {
     if (payment) {
-      db.run(`UPDATE payments SET payment_status = 'Verified' WHERE id = ?`, [payId]);
-      db.run(`UPDATE applications SET payment_status = 'Paid' WHERE id = ?`, [payment.application_id]);
-      addNotification(payment.customer_id, 'Payment Verified', `Your payment for ${payment.tracking_number} has been verified.`);
-      logAudit(req.session.admin.username, `Verified payment for tracking number ${payment.tracking_number}`);
+      db.run(`UPDATE payments SET payment_status = 'Verified' WHERE id = ?`, [paymentId]);
+      db.run(`UPDATE applications SET payment_status = 'Paid & Verified' WHERE id = ?`, [payment.application_id]);
+      addNotification(payment.customer_id, 'Payment Verified!', `Your payment for tracking number ${payment.tracking_number} has been verified by admin.`);
     }
     res.redirect('/admin/payments');
   });
 });
 
-app.get('/admin/tickets', requireAdmin, (req, res) => {
-  db.all(`SELECT t.*, u.full_name as customer_name FROM tickets t JOIN users u ON t.customer_id = u.id ORDER BY t.id DESC`, [], (err, tickets) => {
-    const content = `
-      <h1 class="text-3xl font-black text-white mb-6">Support Tickets Desk</h1>
-      <div class="bg-slate-950 p-6 rounded-3xl shadow-xl space-y-4 border border-slate-800">
-        ${tickets.length === 0 ? `<p class="text-slate-500 text-sm">No tickets submitted.</p>` : tickets.map(t => `
-          <div class="border border-slate-800 p-6 rounded-2xl bg-slate-900 space-y-3">
-            <div class="flex justify-between items-center">
-              <div>
-                <span class="font-bold text-white text-base">${t.subject}</span>
-                <span class="text-xs text-slate-400 block">From: ${t.customer_name} &bull; ${t.created_at}</span>
-              </div>
-              <span class="px-2.5 py-1 bg-amber-900 text-amber-200 rounded-full font-bold text-xs">${t.status}</span>
-            </div>
-            <p class="text-sm text-slate-300 bg-slate-950 p-4 rounded-xl border border-slate-800">${t.message}</p>
-            
-            <form action="/admin/ticket/${t.id}/reply" method="POST" class="space-y-2 pt-2">
-              <input type="text" name="admin_reply" value="${t.admin_reply || ''}" placeholder="Type your reply to customer..." required class="w-full border border-slate-700 bg-slate-950 text-white rounded-xl px-3 py-2 text-sm">
-              <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-xs">Send Admin Reply</button>
-            </form>
-          </div>
-        `).join('')}
-      </div>
-    `;
-    res.send(adminLayout('Support Tickets', content, 'tickets'));
-  });
-});
-
-app.post('/admin/ticket/:id/reply', requireAdmin, (req, res) => {
-  const ticketId = req.params.id;
-  const { admin_reply } = req.body;
-  db.get(`SELECT * FROM tickets WHERE id = ?`, [ticketId], (err, ticket) => {
-    db.run(`UPDATE tickets SET admin_reply = ?, status = 'Closed' WHERE id = ?`, [admin_reply, ticketId], () => {
-      addNotification(ticket.customer_id, 'Ticket Replied', `Admin replied to your inquiry: "${ticket.subject}"`);
-      logAudit(req.session.admin.username, `Replied to ticket ID ${ticketId}`);
-      res.redirect('/admin/tickets');
-    });
-  });
-});
-
+// Admin Customer Accounts Management (with 15-day retention monitoring)
 app.get('/admin/users', requireAdmin, (req, res) => {
-  db.all(`SELECT * FROM users ORDER BY id DESC`, [], (err, users) => {
+  db.all(`SELECT u.*, (SELECT COUNT(*) FROM applications WHERE customer_id = u.id) as app_count FROM users u ORDER BY u.id DESC`, [], (err, users) => {
     const content = `
-      <h1 class="text-3xl font-black text-white mb-6">Customer Accounts Directory</h1>
+      <h1 class="text-3xl font-black text-white mb-6">Customer Accounts & 15-Day Retention</h1>
       <div class="bg-slate-950 p-6 rounded-3xl shadow-xl border border-slate-800">
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse">
             <thead>
               <tr class="border-b border-slate-800 bg-slate-900 text-xs text-slate-400 uppercase">
-                <th class="p-3">ID</th>
                 <th class="p-3">Full Name</th>
                 <th class="p-3">Username</th>
-                <th class="p-3">Mobile Number</th>
-                <th class="p-3">Email Address</th>
-                <th class="p-3">Preferred Device</th>
-                <th class="p-3">Registered Date</th>
+                <th class="p-3">Mobile & Email</th>
+                <th class="p-3">Device Used</th>
+                <th class="p-3">Applications</th>
+                <th class="p-3">Last Active / Registered</th>
               </tr>
             </thead>
             <tbody class="text-sm">
               ${users.map(u => `
                 <tr class="border-b border-slate-800 hover:bg-slate-900 transition">
-                  <td class="p-3 font-mono text-slate-400">#${u.id}</td>
                   <td class="p-3 font-bold">${u.full_name}</td>
-                  <td class="p-3 font-semibold text-blue-400">${u.username}</td>
-                  <td class="p-3 text-slate-300">${u.mobile_number}</td>
-                  <td class="p-3 text-slate-300">${u.email_address}</td>
-                  <td class="p-3"><span class="px-2 py-0.5 bg-slate-800 text-xs rounded uppercase font-mono">${u.device_preference || 'mobile'}</span></td>
-                  <td class="p-3 text-xs text-slate-400">${u.created_at}</td>
+                  <td class="p-3 font-mono text-blue-400">${u.username}</td>
+                  <td class="p-3 text-xs text-slate-300">${u.mobile_number}<br>${u.email_address}</td>
+                  <td class="p-3"><span class="px-2.5 py-1 bg-blue-950 text-blue-300 rounded-full text-xs font-bold">${u.device_type || 'Mobile'}</span></td>
+                  <td class="p-3"><span class="px-2.5 py-1 bg-indigo-950 text-indigo-300 rounded-full text-xs font-bold">${u.app_count}</span></td>
+                  <td class="p-3 text-xs text-slate-400">${u.last_active || u.created_at}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -2142,119 +2035,176 @@ app.get('/admin/users', requireAdmin, (req, res) => {
         </div>
       </div>
     `;
-    res.send(adminLayout('Customer Directory', content, 'users'));
+    res.send(adminLayout('Customers', content, 'users'));
   });
 });
 
+// Admin Support Tickets
+app.get('/admin/tickets', requireAdmin, (req, res) => {
+  db.all(`SELECT t.*, u.full_name as customer_name FROM tickets t JOIN users u ON t.customer_id = u.id ORDER BY t.id DESC`, [], (err, tickets) => {
+    const content = `
+      <h1 class="text-3xl font-black text-white mb-6">Support Tickets</h1>
+      <div class="space-y-4">
+        ${tickets.length === 0 ? `<p class="text-slate-400 text-sm">No support tickets.</p>` : tickets.map(t => `
+          <div class="bg-slate-950 p-6 rounded-3xl shadow-xl border border-slate-800 space-y-3">
+            <div class="flex justify-between items-center">
+              <div>
+                <h4 class="font-bold text-white text-base">${t.subject}</h4>
+                <p class="text-xs text-slate-400">From: <strong>${t.customer_name}</strong> &bull; ${t.created_at}</p>
+              </div>
+              <span class="px-3 py-1 bg-amber-950 text-amber-300 rounded-full text-xs font-bold">${t.status}</span>
+            </div>
+            <p class="text-sm text-slate-300 bg-slate-900 p-4 rounded-2xl border border-slate-800">${t.message}</p>
+            ${t.admin_reply ? `<div class="bg-blue-950 p-4 rounded-2xl border border-blue-900 text-xs text-blue-200"><strong>Your Reply:</strong> ${t.admin_reply}</div>` : `
+              <form action="/admin/tickets/${t.id}/reply" method="POST" class="space-y-2 mt-2">
+                <textarea name="admin_reply" required rows="2" placeholder="Type reply to customer..." class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white"></textarea>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition">Send Reply</button>
+              </form>
+            `}
+          </div>
+        `).join('')}
+      </div>
+    `;
+    res.send(adminLayout('Tickets', content, 'tickets'));
+  });
+});
+
+app.post('/admin/tickets/:id/reply', requireAdmin, (req, res) => {
+  const ticketId = req.params.id;
+  const { admin_reply } = req.body;
+  db.get(`SELECT customer_id FROM tickets WHERE id = ?`, [ticketId], (err, t) => {
+    if (t) {
+      db.run(`UPDATE tickets SET admin_reply = ?, status = 'Resolved' WHERE id = ?`, [admin_reply, ticketId], () => {
+        addNotification(t.customer_id, 'Support Ticket Replied', 'An admin has responded to your support inquiry.');
+        res.redirect('/admin/tickets');
+      });
+    } else {
+      res.redirect('/admin/tickets');
+    }
+  });
+});
+
+// Admin Settings, Fees & Specific QR Codes Management
 app.get('/admin/settings', requireAdmin, async (req, res) => {
-  const settings = await getSettings();
+  const settings = res.locals.settings;
   const content = `
-    <h1 class="text-3xl font-black text-white mb-6">System Settings, Fees & QR Codes</h1>
-    <form action="/admin/settings" method="POST" enctype="multipart/form-data" class="bg-slate-950 p-8 rounded-3xl shadow-xl space-y-6 border border-slate-800 max-w-3xl">
-      <div class="grid md:grid-cols-2 gap-4">
+    <h1 class="text-3xl font-black text-white mb-6">Settings, Fees & Service QR Codes</h1>
+    <form action="/admin/settings" method="POST" enctype="multipart/form-data" class="bg-slate-950 p-8 rounded-3xl shadow-xl space-y-6 border border-slate-800">
+      <div class="grid md:grid-cols-2 gap-6">
         <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Business / Platform Name</label>
-          <input type="text" name="business_name" value="${settings.business_name}" required class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
+          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Business Name</label>
+          <input type="text" name="business_name" value="${settings.business_name}" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
         </div>
         <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Creator / Developer Name</label>
-          <input type="text" name="creator_name" value="${settings.creator_name}" required class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
+          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Creator Name</label>
+          <input type="text" name="creator_name" value="${settings.creator_name}" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Contact Number</label>
+          <input type="text" name="contact_number" value="${settings.contact_number}" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Support Email</label>
+          <input type="email" name="email" value="${settings.email}" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
         </div>
         <div>
           <label class="block text-xs font-bold uppercase text-slate-400 mb-1">GCash Account Name</label>
-          <input type="text" name="gcash_name" value="${settings.gcash_name}" required class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
+          <input type="text" name="gcash_name" value="${settings.gcash_name}" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
         </div>
         <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">GCash Account Number</label>
-          <input type="text" name="gcash_number" value="${settings.gcash_number}" required class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
+          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">GCash Number</label>
+          <input type="text" name="gcash_number" value="${settings.gcash_number}" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">BIR / TIN Fee (₱)</label>
+          <input type="number" name="fee_bir" value="${settings.fee_bir}" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">SSS Fee (₱)</label>
+          <input type="number" name="fee_sss" value="${settings.fee_sss}" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Pag-IBIG Fee (₱)</label>
+          <input type="number" name="fee_pagibig" value="${settings.fee_pagibig}" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">
         </div>
       </div>
 
-      <div class="grid md:grid-cols-3 gap-4 border-t border-slate-800 pt-4">
-        <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">BIR Application Fee (₱)</label>
-          <input type="text" name="fee_bir" value="${settings.fee_bir}" required class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">SSS Application Fee (₱)</label>
-          <input type="text" name="fee_sss" value="${settings.fee_sss}" required class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Pag-IBIG Application Fee (₱)</label>
-          <input type="text" name="fee_pagibig" value="${settings.fee_pagibig}" required class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
-        </div>
-      </div>
-
-      <div class="grid md:grid-cols-3 gap-4 border-t border-slate-800 pt-4">
-        <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Upload BIR GCash QR</label>
-          <input type="file" name="qr_bir" accept="image/*" class="w-full text-xs text-slate-400">
-        </div>
-        <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Upload SSS GCash QR</label>
-          <input type="file" name="qr_sss" accept="image/*" class="w-full text-xs text-slate-400">
-        </div>
-        <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Upload Pag-IBIG GCash QR</label>
-          <input type="file" name="qr_pagibig" accept="image/*" class="w-full text-xs text-slate-400">
+      <div class="border-t border-slate-800 pt-6">
+        <h3 class="font-black text-white text-lg mb-4">Dedicated Service QR Codes (GCash)</h3>
+        <div class="grid md:grid-cols-3 gap-6">
+          <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800 text-center space-y-2">
+            <span class="text-xs font-bold text-blue-400 block">BIR QR Code</span>
+            ${settings.qr_bir ? `<img src="${settings.qr_bir}" class="h-28 w-28 object-contain mx-auto rounded border border-slate-700"/>` : '<span class="text-xs text-slate-500">Not set</span>'}
+            <input type="file" name="qr_bir" accept="image/*" class="w-full text-xs text-slate-300">
+          </div>
+          <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800 text-center space-y-2">
+            <span class="text-xs font-bold text-emerald-400 block">SSS QR Code</span>
+            ${settings.qr_sss ? `<img src="${settings.qr_sss}" class="h-28 w-28 object-contain mx-auto rounded border border-slate-700"/>` : '<span class="text-xs text-slate-500">Not set</span>'}
+            <input type="file" name="qr_sss" accept="image/*" class="w-full text-xs text-slate-300">
+          </div>
+          <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800 text-center space-y-2">
+            <span class="text-xs font-bold text-amber-400 block">Pag-IBIG QR Code</span>
+            ${settings.qr_pagibig ? `<img src="${settings.qr_pagibig}" class="h-28 w-28 object-contain mx-auto rounded border border-slate-700"/>` : '<span class="text-xs text-slate-500">Not set</span>'}
+            <input type="file" name="qr_pagibig" accept="image/*" class="w-full text-xs text-slate-300">
+          </div>
         </div>
       </div>
 
-      <div class="space-y-3 border-t border-slate-800 pt-4">
-        <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Top Announcement Text</label>
-          <input type="text" name="announcement" value="${settings.announcement}" class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Maintenance Mode</label>
-          <select name="maintenance_mode" class="w-full border border-slate-700 bg-slate-900 text-white rounded-xl px-3 py-2 text-sm">
-            <option value="0" ${settings.maintenance_mode === '0' ? 'selected' : ''}>Disabled (Live Applications Open)</option>
-            <option value="1" ${settings.maintenance_mode === '1' ? 'selected' : ''}>Enabled (Block New Applications)</option>
-          </select>
-        </div>
+      <div class="border-t border-slate-800 pt-6">
+        <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Announcement Banner Message</label>
+        <textarea name="announcement" rows="2" class="w-full border border-slate-700 bg-slate-900 rounded-xl px-3 py-2 text-sm text-white">${settings.announcement}</textarea>
       </div>
 
-      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-xl text-xs shadow transition">Save Settings</button>
+      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-3 rounded-xl text-sm transition shadow">Save Settings & QR Codes</button>
     </form>
   `;
   res.send(adminLayout('Settings', content, 'settings'));
 });
 
-const qrUpload = upload.fields([
+const stUpload = upload.fields([
   { name: 'qr_bir', maxCount: 1 },
   { name: 'qr_sss', maxCount: 1 },
   { name: 'qr_pagibig', maxCount: 1 }
 ]);
 
-app.post('/admin/settings', requireAdmin, qrUpload, (req, res) => {
+app.post('/admin/settings', requireAdmin, stUpload, async (req, res) => {
   const body = req.body;
   const files = req.files;
 
-  for (const [k, v] of Object.entries(body)) {
-    db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, [k, v]);
+  for (const [key, value] of Object.entries(body)) {
+    db.run(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?`, [key, value, value]);
   }
 
   if (files) {
-    if (files['qr_bir']) db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES ('qr_bir', ?)`, ['/uploads/' + files['qr_bir'][0].filename]);
-    if (files['qr_sss']) db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES ('qr_sss', ?)`, ['/uploads/' + files['qr_sss'][0].filename]);
-    if (files['qr_pagibig']) db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES ('qr_pagibig', ?)`, ['/uploads/' + files['qr_pagibig'][0].filename]);
+    if (files['qr_bir'] && files['qr_bir'][0]) {
+      const pathVal = '/uploads/' + files['qr_bir'][0].filename;
+      db.run(`INSERT INTO settings (key, value) VALUES ('qr_bir', ?) ON CONFLICT(key) DO UPDATE SET value = ?`, [pathVal, pathVal]);
+    }
+    if (files['qr_sss'] && files['qr_sss'][0]) {
+      const pathVal = '/uploads/' + files['qr_sss'][0].filename;
+      db.run(`INSERT INTO settings (key, value) VALUES ('qr_sss', ?) ON CONFLICT(key) DO UPDATE SET value = ?`, [pathVal, pathVal]);
+    }
+    if (files['qr_pagibig'] && files['qr_pagibig'][0]) {
+      const pathVal = '/uploads/' + files['qr_pagibig'][0].filename;
+      db.run(`INSERT INTO settings (key, value) VALUES ('qr_pagibig', ?) ON CONFLICT(key) DO UPDATE SET value = ?`, [pathVal, pathVal]);
+    }
   }
 
-  logAudit(req.session.admin.username, 'Updated system settings and QR codes');
+  logAudit(req.session.admin.username, 'Updated system settings & QR codes');
   res.redirect('/admin/settings');
 });
 
+// Audit Logs
 app.get('/admin/audit', requireAdmin, (req, res) => {
-  db.all(`SELECT * FROM audit_logs ORDER BY id DESC LIMIT 100`, [], (err, logs) => {
+  db.all(`SELECT * FROM audit_logs ORDER BY id DESC`, [], (err, logs) => {
     const content = `
-      <h1 class="text-3xl font-black text-white mb-6">Security & Admin Audit Logs</h1>
+      <h1 class="text-3xl font-black text-white mb-6">Admin Audit Logs</h1>
       <div class="bg-slate-950 p-6 rounded-3xl shadow-xl border border-slate-800">
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse">
             <thead>
               <tr class="border-b border-slate-800 bg-slate-900 text-xs text-slate-400 uppercase">
-                <th class="p-3">ID</th>
-                <th class="p-3">Admin</th>
+                <th class="p-3">Admin User</th>
                 <th class="p-3">Action Performed</th>
                 <th class="p-3">Timestamp</th>
               </tr>
@@ -2262,9 +2212,8 @@ app.get('/admin/audit', requireAdmin, (req, res) => {
             <tbody class="text-sm">
               ${logs.map(l => `
                 <tr class="border-b border-slate-800 hover:bg-slate-900 transition">
-                  <td class="p-3 font-mono text-slate-500">#${l.id}</td>
                   <td class="p-3 font-bold text-blue-400">${l.admin_username}</td>
-                  <td class="p-3 text-slate-300">${l.action}</td>
+                  <td class="p-3">${l.action}</td>
                   <td class="p-3 text-xs text-slate-400">${l.created_at}</td>
                 </tr>
               `).join('')}
@@ -2277,26 +2226,68 @@ app.get('/admin/audit', requireAdmin, (req, res) => {
   });
 });
 
-// JSON Database Export Backup (Feature #25)
+// JSON Backup / Export
 app.get('/admin/backup', requireAdmin, (req, res) => {
-  db.all(`SELECT * FROM users`, [], (err, users) => {
-    db.all(`SELECT * FROM applications`, [], (err2, apps) => {
+  db.all(`SELECT * FROM applications`, [], (err, apps) => {
+    db.all(`SELECT * FROM users`, [], (err2, users) => {
       db.all(`SELECT * FROM payments`, [], (err3, payments) => {
-        const data = {
-          export_date: new Date().toISOString(),
+        const backupData = {
+          exported_at: new Date().toISOString(),
+          developer: 'Mark Jerald Agdigos',
           users,
           applications: apps,
           payments
         };
         res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Content-Disposition', 'attachment; filename=govassist-database-backup.json');
-        res.send(JSON.stringify(data, null, 2));
+        res.setHeader('Content-Disposition', 'attachment; filename=govassist_ph_backup.json');
+        res.send(JSON.stringify(backupData, null, 2));
       });
     });
   });
 });
 
+// Printable Application Summary Sheet
+app.get('/admin/print/:id', requireAdmin, (req, res) => {
+  const appId = req.params.id;
+  db.get(`SELECT a.*, u.full_name as customer_name, u.username, u.email_address, u.mobile_number FROM applications a JOIN users u ON a.customer_id = u.id WHERE a.id = ?`, [appId], (err, app) => {
+    if (!app) return res.send(`<p>Application not found.</p>`);
+    const formData = JSON.parse(app.data_json || '{}');
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <title>Print Summary - ${app.tracking_number}</title>
+        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+      </head>
+      <body class="bg-white text-slate-900 p-8 font-sans" onload="window.print()">
+        <div class="max-w-3xl mx-auto border-2 border-slate-900 p-8 rounded-2xl space-y-6">
+          <div class="text-center border-b pb-4">
+            <h1 class="text-2xl font-black">GovAssist PH - Official Application Summary</h1>
+            <p class="text-xs text-slate-600">Tracking Number: <strong>${app.tracking_number}</strong> &bull; Service: <strong>${app.service}</strong></p>
+            <p class="text-xs text-slate-500">Developer: Mark Jerald Agdigos</p>
+          </div>
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <div><strong>Full Name:</strong> ${formData.first_name || ''} ${formData.middle_name || ''} ${formData.last_name || ''}</div>
+            <div><strong>Date of Birth:</strong> ${formData.date_of_birth || ''}</div>
+            <div><strong>Mobile:</strong> ${formData.mobile_number || ''}</div>
+            <div><strong>Email:</strong> ${formData.email_address || ''}</div>
+            <div class="col-span-2"><strong>Address:</strong> ${formData.street || ''}, ${formData.barangay || ''}, ${formData.city || ''}, ${formData.province || ''}</div>
+            <div><strong>Status:</strong> ${app.status}</div>
+            <div><strong>Payment Status:</strong> ${app.payment_status}</div>
+          </div>
+          <div class="text-center pt-8 text-xs text-slate-500 border-t">
+            <p>Generated automatically by GovAssist PH System &bull; 2026</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+  });
+});
+
 // Start Server
 app.listen(PORT, () => {
-  console.log(`GovAssist PH Production Server is running on port ${PORT}`);
+  console.log(`GovAssist PH Application running on port ${PORT}`);
+  console.log(`Developer: Mark Jerald Agdigos`);
 });
